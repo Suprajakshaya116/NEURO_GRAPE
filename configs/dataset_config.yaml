@@ -1,0 +1,63 @@
+# Neuro-GRAPE Dataset and Preprocessing Configuration
+# ====================================================
+
+project:
+  name: "Neuro-GRAPE"
+  phase: 2
+  description: "Minimal Reusable Data Pipeline for Multimodal Brain Representations"
+
+paths:
+  raw_handover: "NeuroGRAPE_handover"
+  shared_manifest: "NeuroGRAPE_handover/manifests/shared_stimuli.csv"
+  sample_attributes: "NeuroGRAPE_handover/metadata/sample_attributes_P2.csv"
+  processed_dir: "data/processed"
+  inventory_csv: "data_inventory.csv"
+  splits_csv: "data/splits/pilot_splits.csv"
+
+preprocessing:
+  eeg:
+    raw_file: "NeuroGRAPE_handover/raw/EEG/sub-01/eeg/sub-01_task-rsvp_eeg.vhdr"
+    events_file: "NeuroGRAPE_handover/raw/EEG/sub-01/eeg/sub-01_task-rsvp_events.tsv"
+    sampling_rate_raw: 1000.0
+    resample_freq: 250.0
+    tmin_sec: -0.1
+    tmax_sec: 0.8
+    baseline: [-0.1, 0.0]
+    n_channels: 63
+    signal_units: "V"
+    time_units: "sec"
+    onset_format: "sample_index_1000hz"
+
+  meg:
+    raw_ds: "NeuroGRAPE_handover/raw/MEG/sub-BIGMEG2/ses-07/meg/sub-BIGMEG2_ses-07_task-main_run-06_meg.ds"
+    events_file: "NeuroGRAPE_handover/raw/MEG/sub-BIGMEG2/ses-07/meg/sub-BIGMEG2_ses-07_task-main_run-06_events.tsv"
+    session_nr: 7
+    run_nr: 6
+    sampling_rate_raw: 1200.0
+    resample_freq: 250.0
+    tmin_sec: -0.1
+    tmax_sec: 0.8
+    baseline: [-0.1, 0.0]
+    n_channels: 272  # Primary axial gradiometers
+    signal_units: "T"
+    time_units: "sec"
+    onset_format: "seconds"
+
+  fmri:
+    raw_nii: "NeuroGRAPE_handover/raw/fMRI/sub-01/ses-things08/func/sub-01_ses-things08_task-things_run-10_bold.nii.gz"
+    events_file: "NeuroGRAPE_handover/raw/fMRI/sub-01/ses-things08/func/sub-01_ses-things08_task-things_run-10_events.tsv"
+    tr_sec: 1.5
+    voxel_size_mm: [2.0, 2.0, 2.0]
+    volume_dims: [96, 96, 60, 284]
+    trial_window_tr: [0, 4]  # 4 TRs (0 to 6.0s post onset)
+    signal_units: "raw_bold_counts"
+    hrf_status: "pending_glm_lss"
+
+splits:
+  strategy: "stimulus_disjoint"
+  target_generalization: "held_out_visual_stimuli"
+  ratios:
+    train: 0.60  # 12 stimuli
+    val: 0.20    # 4 stimuli
+    test: 0.20   # 4 stimuli
+  total_shared_stimuli: 20

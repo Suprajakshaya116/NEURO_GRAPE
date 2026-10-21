@@ -1,0 +1,37 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.pytest_cache/
+data/raw/
+data/processed/
+results/
+
+# Python virtual environments
+venv/
+
+# Local secrets
+.env.*
+!.env.example
+
+# Raw dataset archives and recordings
+*.tar.gz
+*.zip
+*.fif
+*.nii
+*.nii.gz
+*.vhdr
+*.vmrk
+*.eeg
+
+# IDE and operating system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Dataset handover files
+NeuroGRAPE_handover/raw/
+NeuroGRAPE_handover/processed/
+NeuroGRAPE_handover.tar.gz
+NeuroGRAPE_pilot_processed_handoff.tar.gz
