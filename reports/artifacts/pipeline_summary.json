@@ -1,0 +1,29 @@
+{
+  "status": "SUCCESS",
+  "output_dir": "reports\\artifacts",
+  "execution_mode": "groupdro_weight_simulation_on_fixed_embeddings",
+  "is_trained_model": false,
+  "methodological_notice": "GroupDRO weights were iteratively updated on fixed baseline embeddings to evaluate group risk and distributional adaptation without modifying model weights. This is a simulation benchmark on representations, not a newly trained model.",
+  "grouping_strategy": "cluster",
+  "num_groups": 2,
+  "group_names": [
+    "Cluster_0",
+    "Cluster_1"
+  ],
+  "detected_embedding_dim": 128,
+  "artifacts": {
+    "metrics_csv": "reports\\artifacts\\metrics.csv",
+    "group_metrics_csv": "reports\\artifacts\\group_metrics.csv",
+    "group_losses_csv": "reports\\artifacts\\group_losses.csv",
+    "group_weights_csv": "reports\\artifacts\\group_weights.csv",
+    "group_assignments_parquet": "reports\\artifacts\\group_assignments.parquet",
+    "group_assignments_csv": "reports\\artifacts\\group_assignments.csv",
+    "clustering_diagnostics_json": "reports\\artifacts\\clustering_diagnostics.json",
+    "experiment_config_yaml": "reports\\artifacts\\experiment_config.yaml"
+  },
+  "train_sample_count": 36,
+  "final_group_weights": {
+    "Cluster_0": 0.5129064917564392,
+    "Cluster_1": 0.487093448638916
+  }
+}

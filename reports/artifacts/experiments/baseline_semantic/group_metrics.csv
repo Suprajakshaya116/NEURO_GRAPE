@@ -1,0 +1,7 @@
+group_id,metric_name,sample_count,mean_value,is_active,is_worst_group,seed
+0,contrastive_loss,2,1.216202288866043,True,False,42
+1,contrastive_loss,2,1.668391466140747,True,True,42
+0,contrastive_loss,2,1.29789799451828,True,False,123
+1,contrastive_loss,2,1.5249025225639343,True,True,123
+0,contrastive_loss,2,1.304218351840973,True,False,456
+1,contrastive_loss,2,1.4979591369628906,True,True,456

@@ -1,0 +1,16 @@
+{
+  "audit_timestamp": "2026-10-23T12:05:00Z",
+  "total_inventory_records": 60,
+  "total_referenced_files": 80,
+  "total_disk_files_found": 80,
+  "missing_files_count": 0,
+  "missing_files": [],
+  "invalid_files_count": 0,
+  "invalid_files": [],
+  "orphan_files_count": 0,
+  "orphan_files": [],
+  "duplicate_sample_ids_count": 0,
+  "duplicate_sample_ids": [],
+  "status": "CLEAN",
+  "details": "All 80 processed .npy files (20 EEG, 20 MEG, 20 fMRI 4-TR windows, 20 fMRI LS-S beta volumes) exist on disk, are 100% referenced by data_inventory.csv, load cleanly without errors, and contain strictly finite float32 arrays with zero NaNs or Infs."
+}

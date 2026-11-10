@@ -1,0 +1,12 @@
+best_epoch_seed42: 1
+best_val_loss_seed42: 1.3906184434890747
+group_lr: 0.05
+group_strategy: semantic
+lr: 0.0001
+mode: groupdro
+num_epochs: 25
+seeds:
+- 42
+- 123
+- 456
+temperature: 0.07

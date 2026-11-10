@@ -1,0 +1,15 @@
+{
+  "mode": "baseline",
+  "group_strategy": "cluster",
+  "num_seeds": 3,
+  "test_overall_loss_mean": 1.4182619601488113,
+  "test_overall_loss_std": 0.021443874886359897,
+  "test_worst_group_loss_mean": 1.4182619601488113,
+  "test_worst_group_loss_std": 0.021443874886359897,
+  "test_loss_gap_mean": 0.0,
+  "test_overall_retrieval_acc_mean": 0.2777777835726738,
+  "test_overall_retrieval_acc_std": 0.048112526017131216,
+  "test_worst_group_retrieval_acc_mean": 0.2777777835726738,
+  "test_retrieval_gap_mean": 0.0,
+  "test_overall_alignment_sim_mean": -0.004016489915860196
+}

@@ -1,0 +1,228 @@
+=== PAGE 1 ===
+Adaptive Data Weighting for Neuro-GRAPE
+A practical, human-readable guide to GroupDRO and DOGE
+Research note for the Neuro-GRAPE project
+October 2026
+Abstract
+Neuro-GRAPEaimstolearnusefulrepresentationsfromdifferentkindsofneuraldata, including
+EEG, MEG, and fMRI. These sources differ in sensors, spatial and temporal resolution, noise, and
+sample availability. A model trained to do well on average can still perform poorly on one source
+or subgroup. This note explains two ways to adjust training emphasis: Group Distributionally
+Robust Optimization (GroupDRO), which directly focuses on the group with the highest loss, and
+DOGE (Domain Reweighting with Generalization Estimation), which estimates which domains’
+gradients help a chosen generalization objective. The methods are related because both adjust
+data weights, but they answer different questions. The mathematical sections give simplified,
+implementation-oriented formulations; exact details should be checked against the original papers
+before reproducing a published method.
+1 Start with the practical problem
+Imagine a training set containing EEG, MEG, and fMRI examples. If the model sees many easy
+EEG examples and fewer difficult fMRI examples, its average training loss may look good while its
+fMRI performance remains weak. A single average can hide that failure.
+Neuro-GRAPE therefore needs to track both:
+• A verage performance: how well the model performs over the evaluation population overall.
+• Group performance: how well it performs separately for each meaningful group, such as
+modality, subject, session, or a predefined data source.
+A group should be defined from reliable metadata where possible. Clusters made from embeddings
+can be useful exploratory partitions, but should not automatically be interpreted as biologically
+meaningful neural states.
+2 Notation used in this note
+Let there beK groups. Groupk contains examples from datasetDk. The model has parametersθ,
+and ℓi(θ) is the loss for examplei. The mean loss in groupk is
+Lk(θ) = 1nk ∑i∈Dkℓi(θ).
+The group weights areq = (q1,...,q K), whereqk≥ 0 and∑kqk = 1. A weighted objective is
+L(θ,q ) =
+K∑
+k=1
+qkLk(θ).
+In plain language,qk says how much influence groupk has on the objective at that point in training.
+1
+
+=== PAGE 2 ===
+3 Method 1: GroupDRO
+3.1 Intuition
+GroupDRO asks: What if we optimize for the group that is currently doing worst, rather than letting
+easy or large groups dominate the average? It raises the influence of groups with high loss. The goal
+is to reduce worst-group loss, not merely the overall average.
+3.2 Mathematical formulation
+A standard group-robust objective is
+min
+θ
+max
+q∈∆K
+K∑
+k=1
+qkLk(θ), ∆K ={q :qk≥ 0,
+K∑
+k=1
+qk = 1}.
+For a fixed model, maximizing over the full simplex places all mass on the group with the largest
+loss, so the inner maximum equalsmaxkLk(θ). In practical algorithms, weights are often updated
+gradually rather than replaced instantly by a one-hot vector.
+A common exponentiated-gradient update is
+q(t+1)k = q(t)k exp(ηqˆL(t)k )∑K
+j=1q(t)j exp(ηqˆL(t)j ),
+where ˆL(t)k is the estimated loss for groupk at stept andηq controls how aggressively the weights react.
+Higher-loss groups gain weight. Implementations may use smoothing, clipping, moving averages, or
+other safeguards.
+The model update must use the weighted training loss:
+ˆL(t)weighted(θ) =
+K∑
+k=1
+q(t)k ˆL(t)k (θ), θ (t+1) =θ(t)−ηθ∇θˆL(t)weighted(θ(t)).
+Important implementation distinction: changingqk on already-computed, frozen embeddings is
+only a weighting simulation. Genuine GroupDRO training requires the weighted loss to participate
+in backpropagation so model parameters are updated.
+3.3 A tiny example
+Suppose the group losses areLEEG = 0.3, LMEG = 0.5, andLfMRI = 0.9. GroupDRO should increase
+the relative weight of fMRI because it has the highest current loss. If that loss reflects noisy labels or
+a broken preprocessing path, however, upweighting it may be harmful; data quality and group sizes
+must be checked.
+4 Method 2: DOGE
+4.1 Intuition
+DOGE asks a different question:Which training domain appears to help the chosen generalization
+objective when we look at how its gradient interacts with gradients from other domains? It does not
+simply focus on whichever domain has the highest loss. It uses a smaller proxy model to estimate
+domain weights, averages those weights over proxy training, and then uses the estimated mixture to
+train a final model.
+2
+
+=== PAGE 3 ===
+4.2 Mathematical formulation from the DOGE research note
+Let α∈ ∆K be domain sampling probabilities andℓk(θ) the loss for domaink. The proxy model is
+updated using a weighted combination of domain gradients:
+θ(t+1) =θ(t)−η(t)θ
+K∑
+j=1
+α(t)j ∇θℓj(θ(t)).
+For the universal-generalization version, the note describes a gradient-alignment score
+W (t)j =
+⟨
+∇θℓj(θ(t)),
+K∑
+i=1
+∇θℓi(θ(t))
+⟩
+.
+The dot product measures whether the gradient for domainj points in a direction aligned with
+the aggregate gradient. Positive alignment means the update direction is broadly compatible with
+reducing the combined objective; negative alignment suggests conflict. The score is an estimate, not
+proof that one domain is scientifically more important.
+The domain weights are updated multiplicatively:
+α(t)j = α(t−1)j exp
+(
+η(t)α
+µ W (t)j
+)
+∑K
+r=1α(t−1)r exp
+(
+η(t)α
+µ W (t)r
+).
+Hereη(t)α is the weight-update step size andµ controls update sensitivity. The denominator normalizes
+weights so they remain non-negative and sum to one. For an out-of-domain objective, the gradient-
+alignment score is instead computed relative to a designated target-domain gradient. That target
+must be a training-time or validation target, never the final held-out test set.
+After proxy training, DOGE averages the weights over steps, for example
+¯αj = 1T T∑t=1α(t)j ,
+and uses ¯α as the fixed domain mixture for training the final model. This two-stage recipe differs
+from online GroupDRO, whose weights are used to emphasize high-loss groups during the model’s
+training.
+4.3 A simple interpretation
+If gradients from one domain tend to align with gradients that improve the selected objective, DOGE
+may assign that domain more sampling weight. But gradient magnitude and alignment can be
+affected by noise, architecture, scaling, and batch composition. The learned weights should be treated
+as optimization diagnostics, not as evidence of shared neural coding.
+5 GroupDRO vs DOGE
+Question GroupDRO DOGE
+What drives the
+weights?
+Current group losses; difficult groups
+receive more emphasis.
+Gradient-based estimate of contribution
+to a generalization objective.
+Primary goal Reduce the worst group’s loss. Learn a data mixture estimated to sup-
+port generalization.
+Typical training setup Weights can be updated online with
+model training.
+Proxy model estimates weights; aver-
+aged mixture trains final model.
+What it does not
+guarantee
+It cannot fix bad data or guarantee every
+group improves.
+It does not directly minimize worst-
+group loss.
+Best role in
+Neuro-GRAPE
+Main robustness method to test. Complementary adaptive-mixture base-
+line.
+3
+
+=== PAGE 4 ===
+6 How this maps to Neuro-GRAPE
+For Neuro-GRAPE, groups could initially be defined by modality (EEG, MEG, fMRI), provided
+the data and evaluation setup support that comparison. Other possible groups include subject,
+session, task, or a prespecified acquisition source. Each choice answers a different question, so group
+definitions should be fixed before looking at final test performance.
+A practical experiment should:
+1. Train a baseline with a fixed, documented sampling mixture.
+2. Train a GroupDRO model using per-example or per-group losses in the actual gradient objective.
+3. Optionally train a DOGE-style mixture baseline with a proxy model and a separate final-model
+run.
+4. Keep architecture, data splits, preprocessing, compute budget, and evaluation metrics comparable.
+5. Tune hyperparameters using training/validation data only; evaluate the held-out test set only for
+final reporting.
+6. Repeat with multiple random seeds when feasible and report uncertainty, not just one score.
+7 Metrics to report
+At minimum, report average loss or task metric, every group’s metric, worst-group metric, and the
+gap between best and worst groups. For a loss where lower is better:
+Lworst = maxk Lk, gapL = maxk Lk− mink Lk.
+For a score where higher is better, define the worst group asminkSk and the gap asmaxkSk−minkSk.
+State clearly which direction is better. Report group sizes because a metric estimated from a tiny
+group can be unstable. Log the GroupDRO weights and losses over time; for DOGE, log gradient
+scores, mixture weights, and weight entropy
+H(α) =−
+K∑
+k=1
+αk log(αk +ε).
+Entropy near zero indicates a highly concentrated mixture; high entropy indicates weights are more
+evenly distributed. Neither extreme is automatically good or bad.
+8 Scientific and engineering guardrails
+• EEG, MEG, and fMRI in this pilot are independent recordings. Shared stimulus identity supports
+semantic correspondence; it does not establish synchronized neural time series.
+• Join records by stable identifiers such assample_id or validated stimulus_id, never by row
+order.
+• Fit preprocessing statistics and clusters on training data only; assign validation/test examples
+using the already-fitted transforms.
+• A cluster is an exploratory partition unless independently validated; do not label it a biological
+neural regime based on silhouette score alone.
+• The 20-stimulus pilot is useful for checking code paths and interfaces, but it is too small to
+establish robust scientific conclusions.
+• Do not call a run genuine GroupDRO unless group-weighted losses affect backpropagation and
+model parameters actually change.
+4
+
+=== PAGE 5 ===
+• Do not claim gains unless the baseline and adaptive method are evaluated fairly on the same
+held-out test set.
+9 Recommended reading
+1. Fan, S., Pagliardini, M., and Jaggi, M. (2023). DOGE: Domain Reweighting with
+Generalization Estimation. 2nd Workshop on Agent Learning in Open-Endedness (ALOE),
+NeurIPS 2023. The DOGE equations and paper-specific description in this note follow the
+provided research note; consult the original paper for exact reproduction details.
+2. Sagawa, S., Koh, P. W., Hashimoto, T. B., and Liang, P. (2020). Distributionally
+Robust Neural Networks for Group Shifts: On the Importance of Regularization for Worst-Case
+Generalization. ICLR 2020. Introduces a widely used GroupDRO formulation for group shifts
+and discusses the importance of regularization.
+3. Oren, Y., Sagawa, S., Hashimoto, T. B., and Liang, P . (2019). Distributionally Robust
+Language Modeling. Findings of EMNLP 2019. An early application of distributionally robust
+optimization to group/domain-level language-modeling performance.
+Source note
+The supplied DOGE research note is the source for the DOGE-specific summary and equations
+included here. GroupDRO is presented using the standard group-robust min–max objective and a
+common exponentiated-gradient implementation sketch. These equations are explanatory formula-
+tions; implementations can differ in regularization, smoothing, loss estimation, and optimization
+details. Check each cited paper before claiming exact reproduction of its algorithm.
+5
+

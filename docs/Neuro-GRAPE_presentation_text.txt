@@ -1,0 +1,297 @@
+=== PAGE 1 ===
+Neuro-GRAPE : Cross-Modality
+Foundation Model with Group-Robust
+Adaptive Pretraining for Neural Data
+PixelPioneers
+
+=== PAGE 2 ===
+Research Problem, Gap & Goal
+Research Problem
+Neural recordings capture the same
+cognition through different spatial and
+temporal views.
+Research Gap
+Current pretraining can favor dominant
+modalities and under-serve difficult neural
+regimes.
+Goal
+Learn one adaptive foundation model that
+is balanced, transferable, and robust.
+EEG
+Fast electrical dynamics
+MEG
+Magnetic temporal
+structure
+fMRI
+Spatial hemodynamic
+patterns
+Adaptive Multimodal
+Foundation Model
+Joint learning that adapts to
+weakness
+Goal — Build adaptive multimodal pretraining that improves robustness without sacrificing transfer.
+
+=== PAGE 3 ===
+Research Hypothesis & Questions
+Research Hypothesis
+Group-robust adaptive pretraining over learned neural regimes will produce more balanced cross-modal representations than
+fixed-mixture training.
+RQ1
+Can shared and private
+representations preserve
+modality-specific signal
+while aligning common
+semantics?
+RQ2
+Can latent regime discovery
+reveal weaknesses beyond
+known modality labels?
+RQ3
+Can adaptive sampling and
+GroupDRO reduce worst-
+regime error while sustaining
+transfer?
+Robust, Balanced &
+Transferable Model
+A foundation model that
+generalizes across
+modalities, regimes, and
+downstream tasks.
+
+=== PAGE 4 ===
+Dataset: THINGS-data (Content & Structure)
+Common visual concepts provide semantic anchors across separate recordings.
+EEG
+High-temporal-resolution responses to
+visual concepts.
+MEG
+Magnetic responses with rich temporal
+dynamics.
+fMRI
+Spatially resolved responses across
+cortical regions.
+Image/Concept ID
+Semantic anchor shared
+across separate
+recordings.
+Modality-Specific Features
+EEG, MEG and fMRI retain their distinct measurement
+structure.
+Shared Latent Space
+Concept-level correspondence
+supports cross-modal alignment.
+Advantage
+Common concepts enable semantic
+alignment without simultaneous
+recording.
+Challenge
+Subjects, sessions, sensors and
+modality statistics remain
+heterogeneous.
+Experiment
+Compare fixed, balanced and adaptive
+multimodal pretraining.
+
+=== PAGE 5 ===
+Proposed Solution: End-to-End Architecture
+Raw Recordings
+EEG, MEG and fMRI
+inputs.
+Quality Control
+Standardize usable
+signals.
+Preprocessing
+Apply modality-
+aware transforms.
+Tokenization
+Create neural
+tokens.
+Modality
+Encoders
+Extract local
+structure.
+Shared/Private
+Split
+Separate common
+and unique signal.
+Latent Alignment
+Use concept anchors.
+Regime Discovery
+Learn hidden difficulty
+groups.
+GroupDRO
+Prioritize weak regimes.
+Adaptive Mixture
+Update sampling
+weights.
+Core novelty — Shared/Private Representation Learning  •  Neural Regime Discovery + GroupDRO  •  Adaptive Data Mixture + Cross-Modal Graph
+Downstream
+Transfer
+Deliver robust
+performance.
+
+=== PAGE 6 ===
+Proposed Solution: Representation Learning
+EEG Encoder
+Captures rapid electrical
+dynamics.
+MEG Encoder
+Captures magnetic
+temporal structure.
+fMRI Encoder
+Captures distributed
+spatial patterns.
+Shared Latent Space
+Aligns semantically
+corresponding neural
+responses.
+Shared Representation
+Encodes modality-invariant
+concept structure.
+Private Representation
+Retains modality-specific
+information.
+Fused Neural
+State
+Combines common
+and complementary
+signal.
+Alignment signal — shared visual concepts connect separate modality recordings.
+
+=== PAGE 7 ===
+Proposed Solution: Neural Regime Discovery + GroupDRO
+The optimizer reacts to learned weaknesses rather than only modality labels.
+LATENT + DYNAMICS
+ REPRESENTATIONS
+TRAIN
+UPDATED MODEL
+ WEAK GROUPS
+RECEIVE  MORE TRAINING
+ RE-EVALUATE GROUPS
+SAMPLING WEIGHTS
+ GroupDRO
+ GROUP LOSS
+GROUP
+PERFORMANCE
+DYNAMIC  GROUPS
+CLUSTER /
+REGIME  DISCOVERY
+KEY IDEA
+Groups can evolve as the representation improves.
+
+=== PAGE 8 ===
+Proposed Solution: Adaptive Data
+Mixture & Cross-Modal Graph
+Use training feedback and modality relationships to decide what to
+sample next.
+Training
+Feedback
+Collect
+losses and
+uncertainty
+.
+Adaptive
+Data
+Mixture
+Adjust
+sampling
+across
+modalities
+and
+regimes.
+Cross-
+Modal
+Graph
+Model
+semantic
+and
+represent
+ational
+relationshi
+ps.
+Priority
+Sampler
+Select
+informative
+training
+examples.
+Updated
+Mini-
+Batch
+Return a
+balanced
+learning
+signal.
+TRAINING CURRICULUM
+Early: representation discovery  →  Middle: robustness  →  Late:
+cross-modal consolidation
+Training Objective, Baselines &
+Evaluation
+L = Lreconstruction + λ align Lalignment + λ private Lseparation
++ λ robust maxg Lg
+Metrics
+Average performance 
+Worst-regime
+performance 
+Cross-modal transfer 
+ Calibration
+Baselines
+Single-modality
+pretraining
+Fixed multimodal
+mixture
+Modality-balanced
+training
+Standard GroupDRO
+Test Conditions
+Held-out concepts
+Held-out subjects
+Cross-modality transfer
+Regime shift
+Pretrain
+Learn general neural
+representations.
+Adaptive
+Training
+Discover regimes
+and rebalance
+learning.
+Test
+Evaluate transfer,
+balance, and
+robustness.
+
+=== PAGE 9 ===
+Comparison with State of the Art (SOTA)
+BrainBERT
+Foundation-style pretraining for intracranial neural signals.
+LaBraM
+Large brain model pretraining for EEG representation
+learning.
+BrainLM
+Generative foundation modeling for functional brain activity.
+MindEye
+Neural decoding through learned visual representations.
+Research gap
+Existing SOTA approaches largely center one modality,
+a fixed mixture, or average-case learning;
+Neuro-GRAPE targets adaptive cross-modality pretraining with robustness to learned neural regimes.
+
+=== PAGE 10 ===
+Proposed Idea & Expected Results
+Proposed idea — Neuro-GRAPE
+Cross-modality foundation learning that combines shared/private representations, learned neural regimes, GroupDRO, adaptive data
+mixture, and a cross-modal graph.
+Expected results — Balanced representations
+The model should reduce competition between modalities.
+Expected results — Robust regimes
+The model should improve attention to underperforming latent
+groups.
+Expected results — Transferable features
+The model should preserve useful shared semantics across
+modalities.
+Expected results — Complementary signal
+The model should retain modality-specific information for
+downstream tasks.
+Evaluation — compare average, worst-regime, transfer, and calibration behavior across baselines and test conditions.
+

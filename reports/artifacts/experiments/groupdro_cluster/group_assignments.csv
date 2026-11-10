@@ -1,0 +1,17 @@
+stimulus_id,group_id,group_name,split,per_sample_loss,per_sample_retrieval_acc,per_sample_alignment_sim
+banner_02s.jpg,1,cluster_1,train,,,
+bear_02s.jpg,1,cluster_1,train,,,
+beet_02s.jpg,1,cluster_1,train,,,
+boa_02s.jpg,1,cluster_1,train,,,
+cucumber_02s.jpg,1,cluster_1,train,,,
+glass_02s.jpg,1,cluster_1,train,,,
+hamburger_02s.jpg,1,cluster_1,train,,,
+hay_02s.jpg,1,cluster_1,train,,,
+inhaler_02s.jpg,1,cluster_1,train,,,
+lampshade_02s.jpg,1,cluster_1,train,,,
+microscope_02s.jpg,1,cluster_1,train,,,
+pea_02s.jpg,1,cluster_1,train,,,
+tadpole_02s.jpg,1,cluster_1,test,1.6100191,0.0,-0.025571803
+tarp_02s.jpg,1,cluster_1,test,1.5125208,0.0,-0.023321742
+wire_02s.jpg,1,cluster_1,test,0.9198838,1.0,0.05377089
+woman_02s.jpg,1,cluster_1,test,1.7267638,0.0,-0.037979763

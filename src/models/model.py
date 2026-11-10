@@ -31,6 +31,7 @@ import torch
 import torch.nn as nn
 
 from src.models.encoders import EEGEncoder, FMRIEncoder, MEGEncoder
+from src.models.graph import CrossModalGraphLayer
 
 
 class TrimodalNeuroGrapeModel(nn.Module):
@@ -45,6 +46,7 @@ class TrimodalNeuroGrapeModel(nn.Module):
         meg_times: Number of MEG timepoints (250 Hz, -100 to 800 ms). Default 225.
         fmri_channels: Input channels for fMRI beta volume. Default 1.
         fmri_volume_shape: Spatial dimensions (X, Y, Z) of fMRI volume. Default (96, 96, 60).
+        use_graph: Whether cross-modal graph layer is enabled. Default True.
     """
 
     def __init__(
@@ -57,10 +59,12 @@ class TrimodalNeuroGrapeModel(nn.Module):
         meg_times: int = 225,
         fmri_channels: int = 1,
         fmri_volume_shape: tuple[int, int, int] = (96, 96, 60),
+        use_graph: bool = True,
     ) -> None:
         super().__init__()
         self.embed_dim = embed_dim
         self.dropout = dropout
+        self.use_graph = use_graph
 
         self.encoders = nn.ModuleDict({
             "eeg": EEGEncoder(
@@ -81,6 +85,18 @@ class TrimodalNeuroGrapeModel(nn.Module):
                 embed_dim=embed_dim,
                 dropout=dropout,
             ),
+        })
+
+        # Cross-modal graph attention layer
+        self.graph_layer = CrossModalGraphLayer(
+            embed_dim=embed_dim, n_heads=4, dropout=dropout, enabled=use_graph
+        )
+
+        # Private reconstruction decoders (predicting sensor statistics)
+        self.decoders = nn.ModuleDict({
+            "eeg": nn.Linear(embed_dim, eeg_channels),
+            "meg": nn.Linear(embed_dim, meg_channels),
+            "fmri": nn.Linear(embed_dim, fmri_volume_shape[2]),  # Z-slices = 60
         })
 
     @property
@@ -122,21 +138,40 @@ class TrimodalNeuroGrapeModel(nn.Module):
         return self.encoders[mod_key](x)
 
     def forward(
-        self, batch: Mapping[str, torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
+        self,
+        batch: Mapping[str, torch.Tensor],
+        return_private: bool = False,
+        apply_graph: bool = True,
+    ) -> Union[Dict[str, torch.Tensor], Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]]:
         """Encode all available modalities in an input batch mapping.
 
         Args:
             batch: Mapping containing one or more modality tensors ('eeg', 'meg', 'fmri').
+            return_private: If True, also returns private embeddings as a second dict.
+            apply_graph: If True and graph_layer is enabled, refines shared representations.
 
         Returns:
-            Dict mapping present modality keys to their (B, embed_dim) L2-normalized embeddings.
+            Dict mapping present modality keys to (B, embed_dim) embeddings, or a tuple
+            of (shared_dict, private_dict) if return_private is True.
         """
-        embeddings: Dict[str, torch.Tensor] = {}
+        shared_embeddings: Dict[str, torch.Tensor] = {}
+        private_embeddings: Dict[str, torch.Tensor] = {}
+
         for mod, enc in self.encoders.items():
             if mod in batch:
-                embeddings[mod] = enc(batch[mod])
-        return embeddings
+                if return_private:
+                    z_s, z_p = enc(batch[mod], return_both=True)
+                    shared_embeddings[mod] = z_s
+                    private_embeddings[mod] = z_p
+                else:
+                    shared_embeddings[mod] = enc(batch[mod])
+
+        if apply_graph and len(shared_embeddings) > 1:
+            shared_embeddings = self.graph_layer(shared_embeddings)
+
+        if return_private:
+            return shared_embeddings, private_embeddings
+        return shared_embeddings
 
     def get_encoder(self, modality: str) -> nn.Module:
         """Retrieve encoder module for the specified modality."""
@@ -163,9 +198,11 @@ class TrimodalNeuroGrapeModel(nn.Module):
         if "encoders" in ckpt:
             for mod in ("eeg", "meg", "fmri"):
                 if mod in ckpt["encoders"]:
-                    self.encoders[mod].load_state_dict(ckpt["encoders"][mod])
+                    self.encoders[mod].load_state_dict(
+                        ckpt["encoders"][mod], strict=False
+                    )
         elif "model_state_dict" in ckpt:
-            self.load_state_dict(ckpt["model_state_dict"])
+            self.load_state_dict(ckpt["model_state_dict"], strict=False)
         return ckpt
 
 

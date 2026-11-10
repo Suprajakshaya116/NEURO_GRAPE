@@ -1,0 +1,124 @@
+{
+  "status": "PASS",
+  "repo_root": "D:\\hciproj\\NEURO_GRAPE",
+  "inventory_checks": {
+    "root_inventory_path": "D:\\hciproj\\NEURO_GRAPE\\data_inventory.csv",
+    "manifest_inventory_path": "D:\\hciproj\\NEURO_GRAPE\\data\\manifests\\data_inventory.csv",
+    "root_inventory_exists": true,
+    "manifest_inventory_exists": true,
+    "inventories_identical": true,
+    "total_records": 60,
+    "unique_sample_ids": 60,
+    "unique_stimuli": 20,
+    "modalities": {
+      "eeg": 20,
+      "meg": 20,
+      "fmri": 20
+    },
+    "splits": {
+      "train": 36,
+      "val": 12,
+      "test": 12
+    }
+  },
+  "modality_file_checks": {
+    "eeg": {
+      "record_count": 20,
+      "shapes": {
+        "(63, 225)": 20
+      },
+      "dtypes": {
+        "float32": 20
+      },
+      "all_finite": true,
+      "mean_val_range": [
+        -0.00019791263912338763,
+        0.0006289355223998427
+      ]
+    },
+    "meg": {
+      "record_count": 20,
+      "shapes": {
+        "(272, 225)": 20
+      },
+      "dtypes": {
+        "float32": 20
+      },
+      "all_finite": true,
+      "mean_val_range": [
+        -1.7488883605198957e-12,
+        2.254041571447818e-12
+      ]
+    },
+    "fmri": {
+      "record_count": 20,
+      "shapes": {
+        "(96, 96, 60)": 20
+      },
+      "dtypes": {
+        "float32": 20
+      },
+      "all_finite": true,
+      "mean_val_range": [
+        -47082.10546875,
+        26209.861328125
+      ]
+    },
+    "fmri_raw_window": {
+      "record_count": 20,
+      "shapes": {
+        "(96, 96, 60, 4)": 20
+      },
+      "all_finite": true
+    }
+  },
+  "all_files_summary": {
+    "total_disk_npy_files": 80,
+    "orphan_files": [],
+    "missing_from_disk": []
+  },
+  "split_checks": {
+    "train_stimuli_count": 12,
+    "val_stimuli_count": 4,
+    "test_stimuli_count": 4,
+    "pairwise_disjoint": true,
+    "split_conflicts": []
+  },
+  "cross_modality_checks": {
+    "all_stimuli_trimodal": true,
+    "trimodal_stimuli_count": 20,
+    "independent_subjects": {
+      "eeg": [
+        "sub-01"
+      ],
+      "meg": [
+        "sub-BIGMEG2"
+      ],
+      "fmri": [
+        "sub-01"
+      ]
+    }
+  },
+  "loader_checks": {
+    "train_len": 36,
+    "val_len": 12,
+    "test_len": 12,
+    "sample_keys": [
+      "sample_id",
+      "modality",
+      "subject_id",
+      "session_id",
+      "run_id",
+      "stimulus_id",
+      "category_id",
+      "category_name",
+      "split",
+      "features",
+      "signal_units",
+      "sampling_rate",
+      "duration_sec"
+    ],
+    "loader_functional": true
+  },
+  "discrepancies": []
+}

@@ -1,0 +1,37 @@
+clustering:
+  disclaimer: Exploratory mathematical clusters across shared embeddings, not proven
+    biological regimes.
+  expected_dim: null
+  fit_split: train
+  n_clusters: 2
+  random_state: 42
+evaluation:
+  metrics:
+  - higher_is_better: false
+    name: crossmodal_contrastive_loss
+  - higher_is_better: true
+    name: crossmodal_cosine_similarity
+  min_group_size: 1
+  temperature: 0.07
+group_dro:
+  learning_rate: 0.05
+  min_group_size: 1
+  min_weight: 0.0
+  num_steps: 10
+  smoothing: 0.01
+  update_frequency: 1
+grouping:
+  metadata_column: category_name
+  strategy: cluster
+paths:
+  checkpoint_path: checkpoints/baseline.pt
+  data_inventory: data_inventory.csv
+  embeddings_pt: embeddings/embeddings.pt
+  metadata_csv: embeddings/metadata.csv
+  output_dir: reports/artifacts
+project:
+  component: "Member 3 \u2014 GroupDRO & Evaluation Pipeline"
+  description: Distributionally robust optimization, unsupervised regime clustering,
+    and worst-group generalization evaluation
+  name: Neuro-GRAPE
+  phase: 5

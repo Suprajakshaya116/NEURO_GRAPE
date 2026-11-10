@@ -108,14 +108,22 @@ class EEGEncoder(nn.Module):
         # preventing the shared-dominant-direction collapse measured at init.
         self.pre_norm = nn.LayerNorm(embed_dim)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Private projection head: retains modality-specific temporal dynamics
+        self.private_proj = nn.Linear(128, embed_dim)
+        self.private_pre_norm = nn.LayerNorm(embed_dim)
+
+    def forward(
+        self, x: torch.Tensor, return_both: bool = False
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Forward pass.
 
         Args:
             x: EEG tensor of shape (B, n_channels, n_times).
+            return_both: If True, returns (z_shared, z_private). Default False.
 
         Returns:
-            L2-normalised embedding of shape (B, embed_dim).
+            L2-normalised embedding of shape (B, embed_dim), or tuple of
+            (shared, private) embeddings if return_both is True.
 
         Raises:
             ValueError: If tensor rank is not 3, channel count is wrong,
@@ -138,8 +146,13 @@ class EEGEncoder(nn.Module):
 
         # (B, 128, T) -> (B, 128, 1) -> (B, 128) -> LayerNorm -> L2-unit sphere
         h = self.backbone(x).squeeze(-1)
-        z = self.pre_norm(self.proj(h))
-        return F.normalize(z, p=2, dim=1)
+        z_shared = F.normalize(self.pre_norm(self.proj(h)), p=2, dim=1)
+        if return_both:
+            z_private = F.normalize(
+                self.private_pre_norm(self.private_proj(h)), p=2, dim=1
+            )
+            return z_shared, z_private
+        return z_shared
 
 
 # ---------------------------------------------------------------------------
@@ -177,14 +190,22 @@ class MEGEncoder(nn.Module):
         self.proj = nn.Linear(128, embed_dim)
         self.pre_norm = nn.LayerNorm(embed_dim)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Private projection head: retains modality-specific MEG temporal dynamics
+        self.private_proj = nn.Linear(128, embed_dim)
+        self.private_pre_norm = nn.LayerNorm(embed_dim)
+
+    def forward(
+        self, x: torch.Tensor, return_both: bool = False
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Forward pass.
 
         Args:
             x: MEG tensor of shape (B, n_channels, n_times).
+            return_both: If True, returns (z_shared, z_private). Default False.
 
         Returns:
-            L2-normalised embedding of shape (B, embed_dim).
+            L2-normalised embedding of shape (B, embed_dim), or tuple of
+            (shared, private) embeddings if return_both is True.
 
         Raises:
             ValueError: If tensor rank is not 3, channel count is wrong,
@@ -206,8 +227,13 @@ class MEGEncoder(nn.Module):
             )
 
         h = self.backbone(x).squeeze(-1)
-        z = self.pre_norm(self.proj(h))
-        return F.normalize(z, p=2, dim=1)
+        z_shared = F.normalize(self.pre_norm(self.proj(h)), p=2, dim=1)
+        if return_both:
+            z_private = F.normalize(
+                self.private_pre_norm(self.private_proj(h)), p=2, dim=1
+            )
+            return z_shared, z_private
+        return z_shared
 
 
 # ---------------------------------------------------------------------------
@@ -273,15 +299,22 @@ class FMRIEncoder(nn.Module):
         self.proj = nn.Linear(64, embed_dim)
         self.pre_norm = nn.LayerNorm(embed_dim)
 
+        # Private projection head: retains modality-specific fMRI spatial patterns
+        self.private_proj = nn.Linear(64, embed_dim)
+        self.private_pre_norm = nn.LayerNorm(embed_dim)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, return_both: bool = False
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Forward pass.
 
         Args:
             x: fMRI beta tensor of shape (B, 1, X, Y, Z).
+            return_both: If True, returns (z_shared, z_private). Default False.
 
         Returns:
-            L2-normalised embedding of shape (B, embed_dim).
+            L2-normalised embedding of shape (B, embed_dim), or tuple of
+            (shared, private) embeddings if return_both is True.
 
         Raises:
             ValueError: If tensor rank is not 5, channel count is wrong,
@@ -306,5 +339,10 @@ class FMRIEncoder(nn.Module):
 
         # (B, 64, 1, 1, 1) -> (B, 64) -> proj -> LayerNorm -> L2-unit sphere
         h = self.backbone(x).view(x.shape[0], -1)
-        z = self.pre_norm(self.proj(h))
-        return F.normalize(z, p=2, dim=1)
+        z_shared = F.normalize(self.pre_norm(self.proj(h)), p=2, dim=1)
+        if return_both:
+            z_private = F.normalize(
+                self.private_pre_norm(self.private_proj(h)), p=2, dim=1
+            )
+            return z_shared, z_private
+        return z_shared

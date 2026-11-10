@@ -1,0 +1,14 @@
+{
+  "n_clusters": 2,
+  "random_state": 42,
+  "expected_dim": 128,
+  "fit_split": "train",
+  "train_sample_count": 36,
+  "train_cluster_counts": {
+    "0": 24,
+    "1": 12
+  },
+  "inertia": 14.206710815429688,
+  "silhouette_score_train": 0.4776536226272583,
+  "disclaimer": "Clusters represent exploratory mathematical groupings across shared neural embeddings for GroupDRO evaluation, NOT proven biological neural regimes."
+}
