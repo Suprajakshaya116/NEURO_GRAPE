@@ -60,6 +60,8 @@ def evaluate_clean_crossmodal_retrieval(
     gallery_embeddings: Mapping[str, torch.Tensor],
     stimulus_ids: Sequence[str],
     category_names: Sequence[str],
+    custom_group_labels: Optional[Sequence[int]] = None,
+    custom_group_names: Optional[Dict[int, str]] = None,
     temperature: float = 0.07,
     seed: int = 42,
     model_name: str = "model",
@@ -71,6 +73,8 @@ def evaluate_clean_crossmodal_retrieval(
         gallery_embeddings: Dict mapping modality name ('eeg', 'meg') to (N, D) gallery tensors.
         stimulus_ids: Ordered sequence of N ground-truth stimulus IDs.
         category_names: Ordered sequence of N concept category strings.
+        custom_group_labels: Optional (N,) integer array of group assignments.
+        custom_group_names: Optional dict mapping group int to name string.
         temperature: Scaling temperature for softmax confidence computation.
         seed: Random seed for prediction tracing.
         model_name: Identifier for model logging.
@@ -82,15 +86,21 @@ def evaluate_clean_crossmodal_retrieval(
     if n == 0:
         raise ValueError("Cannot evaluate empty stimulus sequence.")
 
-    # Binary semantic group: 1 for Animate, 0 for Inanimate
-    group_labels = np.array(
-        [1 if str(cat).lower() in ANIMATE_CATEGORIES else 0 for cat in category_names],
-        dtype=int,
-    )
+    # Group assignment: custom or fallback to binary animacy
+    if custom_group_labels is not None:
+        group_labels = np.asarray(custom_group_labels, dtype=int)
+    else:
+        group_labels = np.array(
+            [1 if str(cat).lower() in ANIMATE_CATEGORIES else 0 for cat in category_names],
+            dtype=int,
+        )
 
     directions = [("eeg", "meg"), ("meg", "eeg")]
     all_confs: List[float] = []
     all_correct: List[int] = []
+    all_top5: List[int] = []
+    all_top10: List[int] = []
+    all_reciprocal_ranks: List[float] = []
     direction_top1: Dict[str, float] = {}
     direction_top2: Dict[str, float] = {}
 
@@ -118,10 +128,18 @@ def evaluate_clean_crossmodal_retrieval(
         targets = np.arange(n)
         top1_correct = (preds == targets).astype(int)
 
-        # Top-2 retrieval
+        # Top-k and MRR retrieval
+        sorted_indices = np.argsort(-sim_np, axis=1)
         top2_k = min(2, n)
-        top2_preds = np.argsort(-sim_np, axis=1)[:, :top2_k]
-        top2_correct = np.array([targets[i] in top2_preds[i] for i in range(n)], dtype=int)
+        top5_k = min(5, n)
+        top10_k = min(10, n)
+        top2_preds = sorted_indices[:, :top2_k]
+
+        top2_correct = np.array([targets[i] in sorted_indices[i, :top2_k] for i in range(n)], dtype=int)
+        top5_correct = np.array([targets[i] in sorted_indices[i, :top5_k] for i in range(n)], dtype=int)
+        top10_correct = np.array([targets[i] in sorted_indices[i, :top10_k] for i in range(n)], dtype=int)
+        ranks = np.array([int(np.where(sorted_indices[i] == targets[i])[0][0]) + 1 for i in range(n)])
+        reciprocal_ranks = 1.0 / ranks
 
         dir_key = f"{q_mod}_to_{g_mod}"
         direction_top1[dir_key] = float(np.mean(top1_correct))
@@ -130,6 +148,9 @@ def evaluate_clean_crossmodal_retrieval(
         confs = np.max(prob_np, axis=1)
         all_confs.extend(confs.tolist())
         all_correct.extend(top1_correct.tolist())
+        all_top5.extend(top5_correct.tolist())
+        all_top10.extend(top10_correct.tolist())
+        all_reciprocal_ranks.extend(reciprocal_ranks.tolist())
 
         y_true_all.extend(targets.tolist())
         y_pred_all.extend(preds.tolist())
@@ -140,8 +161,11 @@ def evaluate_clean_crossmodal_retrieval(
             top2_sim = float(sorted_sims[1]) if len(sorted_sims) > 1 else top1_sim
             correct_flag = int(top1_correct[i])
 
-            r1_idx = int(top2_preds[i, 0])
-            r2_idx = int(top2_preds[i, 1]) if top2_k > 1 else r1_idx
+            r1_idx = int(sorted_indices[i, 0])
+            r2_idx = int(sorted_indices[i, 1]) if n > 1 else r1_idx
+
+            g_val = int(group_labels[i])
+            g_name = custom_group_names.get(g_val, f"Group_{g_val}") if custom_group_names else ("Animate" if g_val == 1 else "Inanimate")
 
             prediction_records.append({
                 "model_name": model_name,
@@ -159,19 +183,23 @@ def evaluate_clean_crossmodal_retrieval(
                 "rank_2": category_names[r2_idx],
                 "true_target_idx": int(targets[i]),
                 "predicted_target_idx": int(preds[i]),
+                "retrieval_rank": int(ranks[i]),
                 "is_correct": correct_flag,
                 "correct": correct_flag,
                 "confidence": float(confs[i]),
                 "top1_similarity": top1_sim,
                 "top2_similarity": top2_sim,
-                "group_id": int(group_labels[i]),
-                "group": int(group_labels[i]),
-                "group_name": "Animate" if group_labels[i] == 1 else "Inanimate",
+                "group_id": g_val,
+                "group": g_val,
+                "group_name": g_name,
                 "split": "test",
             })
 
     overall_top1 = float(np.mean(all_correct))
     overall_top2 = float(np.mean(list(direction_top2.values())))
+    overall_top5 = float(np.mean(all_top5))
+    overall_top10 = float(np.mean(all_top10))
+    mrr = float(np.mean(all_reciprocal_ranks))
     ece = compute_expected_calibration_error(all_confs, all_correct, n_bins=5)
 
     # Balanced accuracy and Macro-F1
@@ -182,9 +210,10 @@ def evaluate_clean_crossmodal_retrieval(
     # Per-group accuracies across all evaluated directional queries
     pred_df = pd.DataFrame(prediction_records)
     group_accs: Dict[str, float] = {}
-    for g_val in [0, 1]:
+    unique_groups = sorted(list(np.unique(group_labels)))
+    for g_val in unique_groups:
         g_sub = pred_df[pred_df["group"] == g_val]
-        g_name = "Animate" if g_val == 1 else "Inanimate"
+        g_name = custom_group_names.get(g_val, f"Group_{g_val}") if custom_group_names else ("Animate" if g_val == 1 else "Inanimate")
         if len(g_sub) > 0:
             group_accs[g_name] = float(g_sub["correct"].mean())
         else:
@@ -199,6 +228,9 @@ def evaluate_clean_crossmodal_retrieval(
         "seed": seed,
         "overall_top1": overall_top1,
         "overall_top2": overall_top2,
+        "overall_top5": overall_top5,
+        "overall_top10": overall_top10,
+        "mrr": mrr,
         "balanced_accuracy": balanced_acc,
         "macro_f1": macro_f1,
         "worst_group_accuracy": worst_group_acc,

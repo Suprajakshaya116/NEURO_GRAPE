@@ -1,0 +1,152 @@
+{
+  "Single_EEG": {
+    "model_name": "Single_EEG",
+    "seed": 42,
+    "overall_top1": 0.002347417840375587,
+    "overall_top2": 0.0035211267605633804,
+    "overall_top5": 0.011737089201877934,
+    "overall_top10": 0.023474178403755867,
+    "mrr": 0.01538728323198112,
+    "balanced_accuracy": 0.002347417840375587,
+    "macro_f1": 3.077867549686039e-05,
+    "worst_group_accuracy": 0.0,
+    "mean_group_accuracy": 0.0011792452830188679,
+    "disparity_gap": 0.0023584905660377358,
+    "group_accuracies": {
+      "Inanimate": 0.0023584905660377358,
+      "Animate": 0.0
+    },
+    "ece": 0.0016461836639791727,
+    "direction_top1": {
+      "eeg_to_meg": 0.002347417840375587,
+      "meg_to_eeg": 0.002347417840375587
+    },
+    "direction_top2": {
+      "eeg_to_meg": 0.004694835680751174,
+      "meg_to_eeg": 0.002347417840375587
+    },
+    "elapsed_time": 6.637394666671753,
+    "best_val_loss": -0.997766715294263,
+    "checkpoint_path": "D:\\projects\\NEURO_GRAPE\\reports\\artifacts\\scaled\\Single_EEG_best_model.pt"
+  },
+  "Single_MEG": {
+    "model_name": "Single_MEG",
+    "seed": 42,
+    "overall_top1": 0.0011737089201877935,
+    "overall_top2": 0.002347417840375587,
+    "overall_top5": 0.015258215962441314,
+    "overall_top10": 0.028169014084507043,
+    "mrr": 0.01508430774110526,
+    "balanced_accuracy": 0.0011737089201877935,
+    "macro_f1": 1.0969242244745731e-05,
+    "worst_group_accuracy": 0.0,
+    "mean_group_accuracy": 0.0005896226415094339,
+    "disparity_gap": 0.0011792452830188679,
+    "group_accuracies": {
+      "Inanimate": 0.0011792452830188679,
+      "Animate": 0.0
+    },
+    "ece": 0.0016361806774511933,
+    "direction_top1": {
+      "eeg_to_meg": 0.0,
+      "meg_to_eeg": 0.002347417840375587
+    },
+    "direction_top2": {
+      "eeg_to_meg": 0.0,
+      "meg_to_eeg": 0.004694835680751174
+    },
+    "elapsed_time": 10.217750072479248,
+    "best_val_loss": -0.9980605000605237,
+    "checkpoint_path": "D:\\projects\\NEURO_GRAPE\\reports\\artifacts\\scaled\\Single_MEG_best_model.pt"
+  },
+  "Bimodal_ERM": {
+    "model_name": "Bimodal_ERM",
+    "seed": 42,
+    "overall_top1": 0.002347417840375587,
+    "overall_top2": 0.005868544600938967,
+    "overall_top5": 0.01056338028169014,
+    "overall_top10": 0.028169014084507043,
+    "mrr": 0.01709106999878249,
+    "balanced_accuracy": 0.002347417840375587,
+    "macro_f1": 0.0007824726134585291,
+    "worst_group_accuracy": 0.0,
+    "mean_group_accuracy": 0.0011792452830188679,
+    "disparity_gap": 0.0023584905660377358,
+    "group_accuracies": {
+      "Inanimate": 0.0023584905660377358,
+      "Animate": 0.0
+    },
+    "ece": 0.0006647955160588026,
+    "direction_top1": {
+      "eeg_to_meg": 0.002347417840375587,
+      "meg_to_eeg": 0.002347417840375587
+    },
+    "direction_top2": {
+      "eeg_to_meg": 0.007042253521126761,
+      "meg_to_eeg": 0.004694835680751174
+    },
+    "elapsed_time": 24.97845220565796,
+    "best_val_loss": 6.052830696105957,
+    "checkpoint_path": "D:\\projects\\NEURO_GRAPE\\reports\\artifacts\\scaled\\Bimodal_ERM_best_model.pt"
+  },
+  "GroupDRO_Cluster": {
+    "model_name": "GroupDRO_Cluster",
+    "seed": 42,
+    "overall_top1": 0.004694835680751174,
+    "overall_top2": 0.004694835680751174,
+    "overall_top5": 0.009389671361502348,
+    "overall_top10": 0.017605633802816902,
+    "mrr": 0.01670214874062867,
+    "balanced_accuracy": 0.004694835680751174,
+    "macro_f1": 0.00031266759359841785,
+    "worst_group_accuracy": 0.0013192612137203166,
+    "mean_group_accuracy": 0.016617077415370794,
+    "disparity_gap": 0.030595632403300956,
+    "group_accuracies": {
+      "Regime_0": 0.031914893617021274,
+      "Regime_1": 0.0013192612137203166
+    },
+    "ece": 0.0005159466527402401,
+    "direction_top1": {
+      "eeg_to_meg": 0.002347417840375587,
+      "meg_to_eeg": 0.007042253521126761
+    },
+    "direction_top2": {
+      "eeg_to_meg": 0.002347417840375587,
+      "meg_to_eeg": 0.007042253521126761
+    },
+    "elapsed_time": 25.774752378463745,
+    "best_val_loss": 6.080105304718018,
+    "checkpoint_path": "D:\\projects\\NEURO_GRAPE\\reports\\artifacts\\scaled\\GroupDRO_Cluster_best_model.pt"
+  },
+  "Full_Neuro_GRAPE": {
+    "model_name": "Full_Neuro_GRAPE",
+    "seed": 42,
+    "overall_top1": 0.0011737089201877935,
+    "overall_top2": 0.002347417840375587,
+    "overall_top5": 0.012910798122065728,
+    "overall_top10": 0.02464788732394366,
+    "mrr": 0.01489885068632315,
+    "balanced_accuracy": 0.0011737089201877935,
+    "macro_f1": 0.00033534540576794097,
+    "worst_group_accuracy": 0.0,
+    "mean_group_accuracy": 0.0006596306068601583,
+    "disparity_gap": 0.0013192612137203166,
+    "group_accuracies": {
+      "Regime_0": 0.0,
+      "Regime_1": 0.0013192612137203166
+    },
+    "ece": 0.004711296525783837,
+    "direction_top1": {
+      "eeg_to_meg": 0.0,
+      "meg_to_eeg": 0.002347417840375587
+    },
+    "direction_top2": {
+      "eeg_to_meg": 0.0,
+      "meg_to_eeg": 0.004694835680751174
+    },
+    "elapsed_time": 39.11542749404907,
+    "best_val_loss": 6.113106727600098,
+    "checkpoint_path": "D:\\projects\\NEURO_GRAPE\\reports\\artifacts\\scaled\\Full_Neuro_GRAPE_best_model.pt"
+  }
+}
