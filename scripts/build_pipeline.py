@@ -13,8 +13,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
-# Ensure src is on path
-REPO_ROOT = Path(r"D:\NEURO_GRAPE")
+REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from src.data.preprocessing import (
