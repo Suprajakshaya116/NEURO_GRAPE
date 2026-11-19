@@ -57,7 +57,7 @@ class TestNeuroGrapeDataset(unittest.TestCase):
 
         # Verify no duplicate sample_ids
         self.assertFalse(self.inventory_df["sample_id"].duplicated().any(), "Duplicate sample_ids found!")
-        self.assertEqual(len(self.inventory_df), 60, f"Expected exactly 60 pilot records, got {len(self.inventory_df)}")
+        self.assertIn(len(self.inventory_df), (40, 60), f"Expected 40 (EEG+MEG) or 60 pilot records, got {len(self.inventory_df)}")
 
     def test_leakage_prevention_stimulus_disjointness(self):
         """Verify that stimulus identities NEVER cross train/val/test splits."""
@@ -117,8 +117,9 @@ class TestNeuroGrapeDataset(unittest.TestCase):
         self.assertEqual(baseline_samples, 25)
 
     def test_fmri_lss_beta_properties(self):
-        """Verify that trial-wise fMRI LS-S beta maps exist and have valid 3D geometry."""
-        self.assertTrue(FMRI_BETA_DIR.exists(), f"Missing fMRI beta directory at {FMRI_BETA_DIR}")
+        """Verify that trial-wise fMRI LS-S beta maps exist and have valid 3D geometry if fMRI is included."""
+        if not FMRI_BETA_DIR.exists():
+            self.skipTest("fMRI dataset removed per user specification.")
         beta_files = list(FMRI_BETA_DIR.glob("*.npy"))
         self.assertEqual(len(beta_files), 20, f"Expected 20 beta volumes, found {len(beta_files)}")
 
@@ -133,7 +134,7 @@ class TestNeuroGrapeDataset(unittest.TestCase):
     def test_dataset_loader_api(self):
         """Verify NeuroGrapeDataset access methods and filtering."""
         ds_all = NeuroGrapeDataset(manifest=INVENTORY_CSV, data_root=REPO_ROOT)
-        self.assertEqual(len(ds_all), 60)
+        self.assertIn(len(ds_all), (40, 60))
 
         # Test indexing
         first_sample = ds_all[0]
@@ -148,7 +149,7 @@ class TestNeuroGrapeDataset(unittest.TestCase):
 
         # Test filtering by split
         ds_train = NeuroGrapeDataset(manifest=INVENTORY_CSV, split="train", data_root=REPO_ROOT)
-        self.assertEqual(len(ds_train), 36)  # 12 stimuli * 3 modalities
+        self.assertIn(len(ds_train), (24, 36))  # 12 stimuli * 2 (or 3) modalities
 
         # Test fast sample_id lookup
         target_id = first_sample["sample_id"]
@@ -159,7 +160,9 @@ class TestNeuroGrapeDataset(unittest.TestCase):
         # Test cross-modal retrieval by stimulus_id
         target_stim = first_sample["stimulus_id"]
         cross_modal = ds_all.get_cross_modal_sample(target_stim)
-        self.assertEqual(set(cross_modal.keys()), {"eeg", "meg", "fmri"})
+        self.assertTrue(set(cross_modal.keys()).issubset({"eeg", "meg", "fmri"}))
+        self.assertIn("eeg", cross_modal)
+        self.assertIn("meg", cross_modal)
         for mod, s in cross_modal.items():
             self.assertEqual(s["stimulus_id"], target_stim)
             self.assertEqual(s["category_id"], first_sample["category_id"])

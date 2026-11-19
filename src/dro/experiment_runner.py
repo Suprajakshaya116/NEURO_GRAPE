@@ -139,7 +139,13 @@ def compute_cross_modal_metrics(
         Contains per-pair and average retrieval accuracies and cosine similarities.
     """
     n = len(stimulus_ids)
-    pairs = [("eeg", "meg"), ("eeg", "fmri"), ("meg", "fmri")]
+    active_mods = [m for m in ("eeg", "meg", "fmri") if m in embeddings]
+    pairs = [
+        (active_mods[i], active_mods[j])
+        for i in range(len(active_mods))
+        for j in range(len(active_mods))
+        if i != j
+    ]
     pair_accs: Dict[str, float] = {}
     pair_sims: Dict[str, float] = {}
     per_stim_acc = torch.zeros(n, dtype=torch.float32)
@@ -239,14 +245,13 @@ def train_single_run(
     encoders: Dict[str, nn.Module] = {
         "eeg": EEGEncoder().to(device),
         "meg": MEGEncoder().to(device),
-        "fmri": FMRIEncoder().to(device),
     }
+    if "fmri" in train_batch:
+        encoders["fmri"] = FMRIEncoder().to(device)
 
-    all_params = (
-        list(encoders["eeg"].parameters())
-        + list(encoders["meg"].parameters())
-        + list(encoders["fmri"].parameters())
-    )
+    all_params = []
+    for enc in encoders.values():
+        all_params.extend(list(enc.parameters()))
     optimizer = torch.optim.AdamW(all_params, lr=lr, weight_decay=weight_decay)
 
     # Trajectory logs
@@ -264,11 +269,7 @@ def train_single_run(
             enc.train()
         optimizer.zero_grad()
 
-        z_train = {
-            "eeg": encoders["eeg"](train_batch["eeg"]),
-            "meg": encoders["meg"](train_batch["meg"]),
-            "fmri": encoders["fmri"](train_batch["fmri"]),
-        }
+        z_train = {m: encoders[m](train_batch[m]) for m in encoders}
 
         # Calculate per-example loss vector
         per_example_loss, ordered_ids = per_sample_trimodal_contrastive_loss(
@@ -311,11 +312,7 @@ def train_single_run(
             enc.eval()
 
         with torch.no_grad():
-            z_val = {
-                "eeg": encoders["eeg"](val_batch["eeg"]),
-                "meg": encoders["meg"](val_batch["meg"]),
-                "fmri": encoders["fmri"](val_batch["fmri"]),
-            }
+            z_val = {m: encoders[m](val_batch[m]) for m in encoders}
             val_loss = trimodal_contrastive_loss(
                 embeddings=z_val,
                 stimulus_ids=val_ids,
@@ -417,11 +414,7 @@ def evaluate_on_test_split(
     )
 
     with torch.no_grad():
-        z_test = {
-            "eeg": encoders["eeg"](test_batch["eeg"]),
-            "meg": encoders["meg"](test_batch["meg"]),
-            "fmri": encoders["fmri"](test_batch["fmri"]),
-        }
+        z_test = {m: encoders[m](test_batch[m]) for m in encoders}
 
         # 1. Per-sample loss vector
         per_sample_loss, _ = per_sample_trimodal_contrastive_loss(

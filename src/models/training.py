@@ -60,21 +60,7 @@ def prepare_cross_modal_batch(
 
     Iterates through unique stimulus IDs and retrieves matched cross-modal records,
     ensuring alignment is keyed on stimulus identity rather than CSV row order.
-
-    Args:
-        dataset: NeuroGrapeDataset instance (filtered to train or val split).
-        device: Target torch.device for stacked tensors. Defaults to CPU if None.
-
-    Returns:
-        batch: Dict with keys 'eeg', 'meg', 'fmri' mapping to stacked feature tensors:
-            - 'eeg':  (B, 63, 225) float32 tensor
-            - 'meg':  (B, 272, 225) float32 tensor
-            - 'fmri': (B, 1, 96, 96, 60) float32 tensor
-        stimulus_ids_map: Dict with keys 'eeg', 'meg', 'fmri' mapping to the ordered
-            list of stimulus IDs.
-
-    Raises:
-        ValueError: If dataset contains no samples or no unique stimulus IDs.
+    Dynamically supports available modalities (e.g., 'eeg', 'meg', and optional 'fmri').
     """
     if device is None:
         device = torch.device("cpu")
@@ -87,58 +73,37 @@ def prepare_cross_modal_batch(
     if len(stim_ids) == 0:
         raise ValueError("Dataset contains no unique stimulus IDs.")
 
-    eeg_list: List[torch.Tensor] = []
-    meg_list: List[torch.Tensor] = []
-    fmri_list: List[torch.Tensor] = []
+    active_modalities = sorted(list(meta_df["modality"].str.lower().unique()))
+
+    modal_tensors: Dict[str, List[torch.Tensor]] = {m: [] for m in active_modalities}
 
     for sid in stim_ids:
         sample_dict = dataset.get_cross_modal_sample(sid)
-        for mod in ("eeg", "meg", "fmri"):
+        for mod in active_modalities:
             if mod not in sample_dict:
                 raise KeyError(f"Modality '{mod}' missing for stimulus '{sid}'.")
             if sample_dict[mod]["stimulus_id"] != sid:
                 raise ValueError(
                     f"Stimulus ID mismatch in {mod}: {sample_dict[mod]['stimulus_id']} != {sid}"
                 )
+            feat = sample_dict[mod]["features"]
+            if not isinstance(feat, torch.Tensor):
+                feat = torch.as_tensor(feat, dtype=torch.float32)
+            else:
+                feat = feat.to(dtype=torch.float32)
+            modal_tensors[mod].append(feat)
 
-        eeg_feat = sample_dict["eeg"]["features"]
-        meg_feat = sample_dict["meg"]["features"]
-        fmri_feat = sample_dict["fmri"]["features"]
+    batch: Dict[str, torch.Tensor] = {}
+    stimulus_ids_map: Dict[str, List[str]] = {}
 
-        if not isinstance(eeg_feat, torch.Tensor):
-            eeg_feat = torch.as_tensor(eeg_feat, dtype=torch.float32)
-        else:
-            eeg_feat = eeg_feat.to(dtype=torch.float32)
+    for mod in active_modalities:
+        stacked = torch.stack(modal_tensors[mod], dim=0).to(device)
+        if mod == "fmri" and stacked.ndim == 4:
+            # (B, X, Y, Z) -> (B, 1, X, Y, Z)
+            stacked = stacked.unsqueeze(1)
+        batch[mod] = stacked
+        stimulus_ids_map[mod] = list(stim_ids)
 
-        if not isinstance(meg_feat, torch.Tensor):
-            meg_feat = torch.as_tensor(meg_feat, dtype=torch.float32)
-        else:
-            meg_feat = meg_feat.to(dtype=torch.float32)
-
-        if not isinstance(fmri_feat, torch.Tensor):
-            fmri_feat = torch.as_tensor(fmri_feat, dtype=torch.float32)
-        else:
-            fmri_feat = fmri_feat.to(dtype=torch.float32)
-
-        eeg_list.append(eeg_feat)
-        meg_list.append(meg_feat)
-        fmri_list.append(fmri_feat)
-
-    x_eeg = torch.stack(eeg_list, dim=0).to(device)
-    x_meg = torch.stack(meg_list, dim=0).to(device)
-    # Add channel dimension to fMRI: (B, 96, 96, 60) -> (B, 1, 96, 96, 60)
-    x_fmri = torch.stack(fmri_list, dim=0).unsqueeze(1).to(device)
-
-    batch = {
-        "eeg": x_eeg,
-        "meg": x_meg,
-        "fmri": x_fmri,
-    }
-    stimulus_ids_map = {
-        "eeg": list(stim_ids),
-        "meg": list(stim_ids),
-        "fmri": list(stim_ids),
-    }
     return batch, stimulus_ids_map
 
 
@@ -150,40 +115,18 @@ def train_epoch(
     temperature: float = 0.07,
     sample_weights: Optional[torch.Tensor] = None,
 ) -> float:
-    """Execute a single full-batch training step with optimizer update.
-
-    Ensures zero_grad() is executed before backward propagation, checks loss
-    finiteness, backpropagates, and updates parameters. Supports sample/group
-    weighting for Member 3's GroupDRO integration.
-
-    Args:
-        encoders: Mapping with keys 'eeg', 'meg', 'fmri' to encoder nn.Modules.
-        batch: Mapping with keys 'eeg', 'meg', 'fmri' to input feature tensors.
-        stimulus_ids: Mapping with keys 'eeg', 'meg', 'fmri' to stimulus ID sequences.
-        optimizer: PyTorch optimizer containing parameters of all three encoders.
-        temperature: Softmax scaling temperature for contrastive loss. Default 0.07.
-        sample_weights: Optional (N,) tensor of weights per training sample/stimulus.
-
-    Returns:
-        Scalar training loss value (float).
-
-    Raises:
-        FloatingPointError: If non-finite (NaN or Inf) loss is encountered.
-    """
+    """Execute a single full-batch training step with optimizer update."""
     for enc in encoders.values():
         enc.train()
 
     optimizer.zero_grad()
 
-    z_eeg = encoders["eeg"](batch["eeg"])
-    z_meg = encoders["meg"](batch["meg"])
-    z_fmri = encoders["fmri"](batch["fmri"])
-
     embeddings = {
-        "eeg": z_eeg,
-        "meg": z_meg,
-        "fmri": z_fmri,
+        mod: encoders[mod](batch[mod])
+        for mod in encoders
+        if mod in batch
     }
+
     loss = trimodal_contrastive_loss(
         embeddings,
         stimulus_ids,
@@ -208,38 +151,19 @@ def evaluate(
     stimulus_ids: Mapping[str, Sequence[str]],
     temperature: float = 0.07,
 ) -> float:
-    """Evaluate trimodal contrastive loss on validation batch without gradient updates.
-
-    Captures original .training modes and restores them in a finally block even if
-    an exception occurs during evaluation.
-
-    Args:
-        encoders: Mapping with keys 'eeg', 'meg', 'fmri' to encoder nn.Modules.
-        batch: Mapping with keys 'eeg', 'meg', 'fmri' to input feature tensors.
-        stimulus_ids: Mapping with keys 'eeg', 'meg', 'fmri' to stimulus ID sequences.
-        temperature: Softmax scaling temperature for contrastive loss. Default 0.07.
-
-    Returns:
-        Scalar validation loss value (float).
-
-    Raises:
-        FloatingPointError: If non-finite (NaN or Inf) loss is encountered.
-    """
+    """Evaluate trimodal contrastive loss on validation batch without gradient updates."""
     was_training = {k: enc.training for k, enc in encoders.items()}
     try:
         for enc in encoders.values():
             enc.eval()
 
         with torch.no_grad():
-            z_eeg = encoders["eeg"](batch["eeg"])
-            z_meg = encoders["meg"](batch["meg"])
-            z_fmri = encoders["fmri"](batch["fmri"])
-
             embeddings = {
-                "eeg": z_eeg,
-                "meg": z_meg,
-                "fmri": z_fmri,
+                mod: encoders[mod](batch[mod])
+                for mod in encoders
+                if mod in batch
             }
+
             val_loss = trimodal_contrastive_loss(
                 embeddings, stimulus_ids, temperature=temperature
             )
@@ -268,37 +192,7 @@ def train_model(
     dropout: float = 0.0,
     sample_weights: Optional[torch.Tensor] = None,
 ) -> Dict[str, Any]:
-    """Execute full cross-modal contrastive training loop with in-memory validation checkpointing.
-
-    Uses full-batch training on the 12 training stimuli and evaluates after each epoch
-    on the 4 validation stimuli. The test split is NEVER loaded or evaluated.
-    Supports sample/group weighting for Member 3's GroupDRO integration.
-
-    Args:
-        manifest_path: Path to data inventory CSV. Default 'data_inventory.csv'.
-        num_epochs: Number of training epochs (>= 1). Default 50.
-        lr: AdamW learning rate (> 0). Default 1e-4.
-        weight_decay: AdamW weight decay (>= 0). Default 1e-2.
-        temperature: Softmax temperature (> 0). Default 0.07.
-        seed: Random seed for reproducibility. Default 42.
-        device: Target torch device (MPS or CPU). Auto-detected if None.
-        restore_best_weights: If True, restores models to state with lowest val_loss. Default True.
-        normalize_inputs: If True, standardizes inputs using training statistics only. Default True.
-        dropout: Dropout rate for encoder backbones (>= 0.0 and < 1.0). Default 0.0.
-        sample_weights: Optional (N,) tensor of weights per training sample for GroupDRO.
-
-    Returns:
-        result: Dict containing:
-            - 'encoders': Dict of trained encoder modules ('eeg', 'meg', 'fmri')
-            - 'history': Dict with lists for 'epoch', 'train_loss', 'val_loss'
-            - 'best_epoch': Epoch index with minimum validation loss (1-indexed)
-            - 'best_val_loss': Minimum validation loss achieved
-            - 'best_state_dicts': Dict of detached CPU state dicts at best_epoch
-            - 'normalizer': Fitted TrimodalNormalizer instance (if normalize_inputs else None)
-
-    Raises:
-        ValueError: If hyperparameter arguments are invalid or if dataset splits are empty.
-    """
+    """Execute full cross-modal contrastive training loop with in-memory validation checkpointing."""
     if num_epochs < 1:
         raise ValueError(f"num_epochs must be >= 1, got {num_epochs}")
     if lr <= 0:
@@ -315,7 +209,6 @@ def train_model(
     if device is None:
         device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 
-    # Load only train and val splits. The test split is NEVER loaded or referenced.
     train_ds = NeuroGrapeDataset(manifest=manifest_path, split="train", as_torch=True)
     val_ds = NeuroGrapeDataset(manifest=manifest_path, split="val", as_torch=True)
 
@@ -333,17 +226,18 @@ def train_model(
         train_batch = normalizer.fit_transform(train_batch)
         val_batch = normalizer.transform(val_batch)
 
-    encoders: Dict[str, nn.Module] = {
-        "eeg": EEGEncoder(dropout=dropout).to(device),
-        "meg": MEGEncoder(dropout=dropout).to(device),
-        "fmri": FMRIEncoder(dropout=dropout).to(device),
-    }
+    encoders: Dict[str, nn.Module] = {}
+    if "eeg" in train_batch:
+        encoders["eeg"] = EEGEncoder(dropout=dropout).to(device)
+    if "meg" in train_batch:
+        encoders["meg"] = MEGEncoder(dropout=dropout).to(device)
+    if "fmri" in train_batch:
+        encoders["fmri"] = FMRIEncoder(dropout=dropout).to(device)
 
-    all_params = (
-        list(encoders["eeg"].parameters())
-        + list(encoders["meg"].parameters())
-        + list(encoders["fmri"].parameters())
-    )
+    all_params = []
+    for enc in encoders.values():
+        all_params.extend(list(enc.parameters()))
+
     optimizer = torch.optim.AdamW(all_params, lr=lr, weight_decay=weight_decay)
 
     history: Dict[str, List[Any]] = {

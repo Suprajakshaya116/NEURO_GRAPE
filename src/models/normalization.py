@@ -83,57 +83,56 @@ class TrimodalNormalizer:
             KeyError: If any modality key is missing.
             ValueError: If input tensors have invalid ranks or non-finite values.
         """
-        for mod in ("eeg", "meg", "fmri"):
-            if mod not in batch:
-                raise KeyError(f"Training batch missing required modality '{mod}'.")
+        present = [m for m in ("eeg", "meg", "fmri") if m in batch]
+        if not present:
+            raise KeyError("Training batch contains none of the supported modalities ('eeg', 'meg', 'fmri').")
+        for mod in present:
             if not torch.isfinite(batch[mod]).all():
                 raise ValueError(f"Training batch for '{mod}' contains non-finite values.")
 
-        x_eeg = batch["eeg"]
-        x_meg = batch["meg"]
-        x_fmri = batch["fmri"]
-
-        if x_eeg.ndim != 3:
-            raise ValueError(f"EEG expects 3-D tensor (B, C, T); got {x_eeg.ndim}.")
-        if x_meg.ndim != 3:
-            raise ValueError(f"MEG expects 3-D tensor (B, C, T); got {x_meg.ndim}.")
-        if x_fmri.ndim != 5:
-            raise ValueError(f"fMRI expects 5-D tensor (B, 1, X, Y, Z); got {x_fmri.ndim}.")
-
         # 1. Fit EEG: reduce over batch (0) and time (2) -> shape (1, C, 1)
-        eeg_mean = x_eeg.mean(dim=(0, 2), keepdim=True)
-        eeg_std = x_eeg.std(dim=(0, 2), keepdim=True, unbiased=False)
-        eeg_low = eeg_std < self.tau_eeg
-        self.eeg_mean = eeg_mean.detach().clone()
-        self.eeg_std_safe = torch.where(eeg_low, torch.ones_like(eeg_std), eeg_std).detach().clone()
+        if "eeg" in batch:
+            x_eeg = batch["eeg"]
+            if x_eeg.ndim != 3:
+                raise ValueError(f"EEG expects 3-D tensor (B, C, T); got {x_eeg.ndim}.")
+            eeg_mean = x_eeg.mean(dim=(0, 2), keepdim=True)
+            eeg_std = x_eeg.std(dim=(0, 2), keepdim=True, unbiased=False)
+            eeg_low = eeg_std < self.tau_eeg
+            self.eeg_mean = eeg_mean.detach().clone()
+            self.eeg_std_safe = torch.where(eeg_low, torch.ones_like(eeg_std), eeg_std).detach().clone()
 
         # 2. Fit MEG: reduce over batch (0) and time (2) -> shape (1, C, 1)
-        meg_mean = x_meg.mean(dim=(0, 2), keepdim=True)
-        meg_std = x_meg.std(dim=(0, 2), keepdim=True, unbiased=False)
-        meg_low = meg_std < self.tau_meg
-        self.meg_mean = meg_mean.detach().clone()
-        self.meg_std_safe = torch.where(meg_low, torch.ones_like(meg_std), meg_std).detach().clone()
+        if "meg" in batch:
+            x_meg = batch["meg"]
+            if x_meg.ndim != 3:
+                raise ValueError(f"MEG expects 3-D tensor (B, C, T); got {x_meg.ndim}.")
+            meg_mean = x_meg.mean(dim=(0, 2), keepdim=True)
+            meg_std = x_meg.std(dim=(0, 2), keepdim=True, unbiased=False)
+            meg_low = meg_std < self.tau_meg
+            self.meg_mean = meg_mean.detach().clone()
+            self.meg_std_safe = torch.where(meg_low, torch.ones_like(meg_std), meg_std).detach().clone()
 
         # 3. Fit fMRI: brain-mask preservation
-        # Identify active brain voxels where signal is non-zero in at least one training volume
-        # fmri is (B, 1, X, Y, Z). Mask is spatial boolean across (X, Y, Z)
-        spatial_nonzero = (x_fmri != 0.0).any(dim=0).squeeze(0)  # (X, Y, Z)
-        num_brain_voxels = int(spatial_nonzero.sum().item())
+        if "fmri" in batch:
+            x_fmri = batch["fmri"]
+            if x_fmri.ndim != 5:
+                raise ValueError(f"fMRI expects 5-D tensor (B, 1, X, Y, Z); got {x_fmri.ndim}.")
+            spatial_nonzero = (x_fmri != 0.0).any(dim=0).squeeze(0)  # (X, Y, Z)
+            num_brain_voxels = int(spatial_nonzero.sum().item())
 
-        if num_brain_voxels == 0:
-            # Fallback if entire training split has zero signal
-            self.fmri_mask = spatial_nonzero.detach().clone()
-            self.fmri_in_mask_mean = torch.tensor(0.0, device=x_fmri.device, dtype=x_fmri.dtype)
-            self.fmri_in_mask_std_safe = torch.tensor(1.0, device=x_fmri.device, dtype=x_fmri.dtype)
-        else:
-            in_mask_vals = x_fmri[:, 0, spatial_nonzero]  # (B, num_brain_voxels)
-            fmri_mean = in_mask_vals.mean()
-            fmri_std = in_mask_vals.std(unbiased=False)
-            fmri_std_safe = fmri_std if fmri_std > self.tau_fmri else torch.tensor(1.0, device=x_fmri.device, dtype=x_fmri.dtype)
+            if num_brain_voxels == 0:
+                self.fmri_mask = spatial_nonzero.detach().clone()
+                self.fmri_in_mask_mean = torch.tensor(0.0, device=x_fmri.device, dtype=x_fmri.dtype)
+                self.fmri_in_mask_std_safe = torch.tensor(1.0, device=x_fmri.device, dtype=x_fmri.dtype)
+            else:
+                in_mask_vals = x_fmri[:, 0, spatial_nonzero]
+                fmri_mean = in_mask_vals.mean()
+                fmri_std = in_mask_vals.std(unbiased=False)
+                fmri_std_safe = fmri_std if fmri_std > self.tau_fmri else torch.tensor(1.0, device=x_fmri.device, dtype=x_fmri.dtype)
 
-            self.fmri_mask = spatial_nonzero.detach().clone()
-            self.fmri_in_mask_mean = fmri_mean.detach().clone()
-            self.fmri_in_mask_std_safe = fmri_std_safe.detach().clone()
+                self.fmri_mask = spatial_nonzero.detach().clone()
+                self.fmri_in_mask_mean = fmri_mean.detach().clone()
+                self.fmri_in_mask_std_safe = fmri_std_safe.detach().clone()
 
         self.is_fitted = True
         return self
@@ -153,10 +152,6 @@ class TrimodalNormalizer:
         """
         if not self.is_fitted:
             raise RuntimeError("TrimodalNormalizer must be fitted on training data before calling transform().")
-
-        assert self.eeg_mean is not None and self.eeg_std_safe is not None
-        assert self.meg_mean is not None and self.meg_std_safe is not None
-        assert self.fmri_mask is not None and self.fmri_in_mask_mean is not None and self.fmri_in_mask_std_safe is not None
 
         out: Dict[str, torch.Tensor] = {}
 

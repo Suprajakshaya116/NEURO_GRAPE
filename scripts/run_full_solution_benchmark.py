@@ -1,26 +1,31 @@
 """
 scripts/run_full_solution_benchmark.py
 ======================================
-Comprehensive automated benchmark harness for the full Neuro-GRAPE research solution
-specified in docs/Neuro-GRAPE.pdf.
+Comprehensive automated benchmark harness for the full Neuro-GRAPE research solution.
 
-Executes all named experimental conditions across multiple seeds:
-- Condition A: Single-modality baselines (A1: EEG, A2: MEG, A3: fMRI)
-- Condition B: Fixed-mixture trimodal ERM
+Executes all named experimental conditions across multiple seeds (42, 123, 999):
+- Condition A: Single-modality baselines (A1: EEG, A2: MEG)
+- Condition B: Bimodal ERM baseline (labeled B_Trimodal_ERM for backward compatibility)
 - Condition C: Modality-balanced training
-- Condition D: Standard GroupDRO (Semantic)
-- Condition E: Learned-Regime GroupDRO
+- Condition D: Standard GroupDRO (Semantic: Animate vs Inanimate)
+- Condition E: Learned-Regime GroupDRO (KMeans clustering on training representations)
 - Condition F: Full Neuro-GRAPE (Dual heads + Orthogonality + Reconstruction +
                Cross-modal Graph + Adaptive Sampler + Learned-Regime GroupDRO + 3-Phase Curriculum)
 - Condition G: Component Ablations (G1 to G7 removing one component at a time)
-- Condition H: Transfer and Calibration evaluations (Held-out concepts, Pairwise, Calibration;
-               Held-out subjects marked BLOCKED due to single-subject pilot data)
 
-Generates:
+Evaluates strictly under zero-leakage protocol:
+- Test queries and gallery targets are encoded independently (apply_graph=False).
+- Bidirectional retrieval: EEG -> MEG and MEG -> EEG.
+- Metrics: Overall Top-1, Top-2, Balanced Accuracy, Macro-F1, Worst-Group Accuracy,
+           Disparity Gap, ECE, Directional Top-1.
+
+Outputs:
 - reports/artifacts/full_benchmark_comparison.csv
 - reports/artifacts/full_benchmark_summary.json
+- reports/artifacts/predictions.csv
 - reports/artifacts/full_benchmark/plots/*.png
-- Checkpoints, logs, and per-run metric files
+- reports/artifacts/plots/*.png
+- checkpoints/best_neurogrape_model.pt
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -51,7 +57,11 @@ from src.data.adaptive_sampler import AdaptiveMixtureSampler
 from src.data.dataset import NeuroGrapeDataset
 from src.dro.clustering import EmbeddingClustering
 from src.dro.group_dro import GroupDRO
-from src.models.graph import CrossModalGraphLayer
+from src.evaluation.retrieval import (
+    ANIMATE_CATEGORIES,
+    compute_expected_calibration_error,
+    evaluate_clean_crossmodal_retrieval,
+)
 from src.models.losses import (
     compute_sensor_summary_targets,
     multimodal_contrastive_loss,
@@ -67,94 +77,6 @@ from src.models.training import prepare_cross_modal_batch, set_seed
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("FullBenchmark")
-
-ANIMATE_CATEGORIES = frozenset({"bear", "boa", "tadpole", "woman"})
-
-
-# ---------------------------------------------------------------------------
-# Calibration & Disparity Metric Helpers
-# ---------------------------------------------------------------------------
-
-def compute_expected_calibration_error(
-    confidences: Sequence[float],
-    accuracies: Sequence[float],
-    n_bins: int = 5,
-) -> float:
-    """Compute Expected Calibration Error (ECE) across confidence bins."""
-    confs = np.asarray(confidences, dtype=np.float64)
-    accs = np.asarray(accuracies, dtype=np.float64)
-    n = len(confs)
-    if n == 0:
-        return 0.0
-
-    bins = np.linspace(0.0, 1.0, n_bins + 1)
-    ece = 0.0
-
-    for b in range(n_bins):
-        low, high = bins[b], bins[b + 1]
-        mask = (confs >= low) & (confs <= high if b == n_bins - 1 else confs < high)
-        bin_count = int(np.sum(mask))
-        if bin_count > 0:
-            bin_acc = float(np.mean(accs[mask]))
-            bin_conf = float(np.mean(confs[mask]))
-            ece += (bin_count / n) * abs(bin_acc - bin_conf)
-
-    return float(ece)
-
-
-def evaluate_retrieval_and_calibration(
-    embeddings: Mapping[str, torch.Tensor],
-    stimulus_ids: Sequence[str],
-    temperature: float = 0.07,
-) -> Dict[str, Any]:
-    """Compute pairwise retrieval accuracy, top-k, and calibration error."""
-    n = len(stimulus_ids)
-    pairs = [("eeg", "meg"), ("eeg", "fmri"), ("meg", "fmri")]
-
-    all_confs: List[float] = []
-    all_accs: List[float] = []
-    pair_top1: Dict[str, float] = {}
-    pair_top2: Dict[str, float] = {}
-    per_stimulus_acc: np.ndarray = np.zeros(n, dtype=np.float32)
-
-    for mod_a, mod_b in pairs:
-        z_a = embeddings[mod_a]  # (N, D)
-        z_b = embeddings[mod_b]  # (N, D)
-
-        sim_ab = torch.mm(z_a, z_b.t())  # (N, N)
-        prob_ab = F.softmax(sim_ab / temperature, dim=1)
-
-        # Forward retrieval: A -> B
-        preds_ab = torch.argmax(sim_ab, dim=1).cpu().numpy()
-        targets = np.arange(n)
-        top1_ab = (preds_ab == targets).astype(np.float32)
-        confs_ab = torch.max(prob_ab, dim=1).values.cpu().numpy()
-
-        all_confs.extend(confs_ab.tolist())
-        all_accs.extend(top1_ab.tolist())
-
-        # Top-2 retrieval
-        top2_preds = torch.topk(sim_ab, k=min(2, n), dim=1).indices.cpu().numpy()
-        top2_ab = np.array([targets[i] in top2_preds[i] for i in range(n)], dtype=np.float32)
-
-        pair_name = f"{mod_a}_{mod_b}"
-        pair_top1[pair_name] = float(np.mean(top1_ab))
-        pair_top2[pair_name] = float(np.mean(top2_ab))
-        per_stimulus_acc += top1_ab
-
-    per_stimulus_acc /= len(pairs)
-    overall_top1 = float(np.mean(all_accs))
-    overall_top2 = float(np.mean(list(pair_top2.values())))
-    ece = compute_expected_calibration_error(all_confs, all_accs, n_bins=5)
-
-    return {
-        "overall_top1": overall_top1,
-        "overall_top2": overall_top2,
-        "ece": ece,
-        "pair_top1": pair_top1,
-        "pair_top2": pair_top2,
-        "per_stimulus_acc": per_stimulus_acc,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -177,9 +99,11 @@ def run_single_experiment(
     set_seed(seed)
 
     condition_name = config["name"]
-    epochs = config.get("epochs", 25)
-    lr = config.get("lr", 1e-4)
+    epochs = config.get("epochs", 30)
+    lr = config.get("lr", 1e-3)
+    temperature = config.get("temperature", 0.25)
     weight_decay = config.get("weight_decay", 1e-4)
+    dropout = config.get("dropout", 0.2)
 
     # Feature flags
     is_unimodal = config.get("is_unimodal", False)
@@ -200,25 +124,27 @@ def run_single_experiment(
     val_stim_ids = val_ids_dict["eeg"]
     test_stim_ids = test_ids_dict["eeg"]
 
-    train_metadata = meta_df[meta_df["split"].str.lower() == "train"]
-    val_metadata = meta_df[meta_df["split"].str.lower() == "val"]
-    test_metadata = meta_df[meta_df["split"].str.lower() == "test"]
+    train_metadata = meta_df[meta_df["split"].str.lower() == "train"].drop_duplicates(subset=["stimulus_id"])
+    val_metadata = meta_df[meta_df["split"].str.lower() == "val"].drop_duplicates(subset=["stimulus_id"])
+    test_metadata = meta_df[meta_df["split"].str.lower() == "test"].drop_duplicates(subset=["stimulus_id"])
 
-    # 2. Build Model
-    model = TrimodalNeuroGrapeModel(embed_dim=128, dropout=0.0, use_graph=use_graph)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    test_cat_map = dict(zip(test_metadata["stimulus_id"], test_metadata["category_name"]))
 
-    # 3. Setup Adaptive Mixture Sampler
+    # 1. Build Model
+    model = TrimodalNeuroGrapeModel(embed_dim=128, dropout=dropout, use_graph=use_graph)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    # 2. Setup Adaptive Mixture Sampler
     sampler = None
     if use_adaptive_mixture:
         sampler = AdaptiveMixtureSampler(
-            modalities=["eeg", "meg", "fmri"],
+            modalities=["eeg", "meg"],
             step_size=0.05,
             min_weight=0.15,
             seed=seed,
         )
 
-    # 4. Setup Group Partitioning & GroupDRO
+    # 3. Setup Group Partitioning & GroupDRO
     dro = None
     group_indices_train = None
     group_indices_val = None
@@ -246,7 +172,7 @@ def run_single_experiment(
         with torch.no_grad():
             init_embs = model(train_batch, return_private=False, apply_graph=False)
             train_concat = torch.cat(
-                [init_embs["eeg"], init_embs["meg"], init_embs["fmri"]], dim=1
+                [init_embs["eeg"], init_embs["meg"]], dim=1
             ).numpy()
 
         clustering = EmbeddingClustering(n_clusters=2, random_state=seed)
@@ -261,7 +187,7 @@ def run_single_experiment(
         # For val/test, project onto frozen train centroids
         with torch.no_grad():
             val_embs = model(val_batch, return_private=False, apply_graph=False)
-            val_concat = torch.cat([val_embs["eeg"], val_embs["meg"], val_embs["fmri"]], dim=1).numpy()
+            val_concat = torch.cat([val_embs["eeg"], val_embs["meg"]], dim=1).numpy()
             val_meta = pd.DataFrame({"sample_id": val_stim_ids, "split": ["val"] * len(val_stim_ids)})
             val_assigned = clustering.assign_clusters(
                 {sid: val_concat[i] for i, sid in enumerate(val_stim_ids)}, val_meta
@@ -269,7 +195,7 @@ def run_single_experiment(
             group_indices_val = torch.tensor(val_assigned["cluster_id"].values, dtype=torch.long)
 
             test_embs = model(test_batch, return_private=False, apply_graph=False)
-            test_concat = torch.cat([test_embs["eeg"], test_embs["meg"], test_embs["fmri"]], dim=1).numpy()
+            test_concat = torch.cat([test_embs["eeg"], test_embs["meg"]], dim=1).numpy()
             test_meta = pd.DataFrame({"sample_id": test_stim_ids, "split": ["test"] * len(test_stim_ids)})
             test_assigned = clustering.assign_clusters(
                 {sid: test_concat[i] for i, sid in enumerate(test_stim_ids)}, test_meta
@@ -285,7 +211,7 @@ def run_single_experiment(
     if use_dro:
         dro = GroupDRO(num_groups=num_groups, learning_rate=0.01)
 
-    # 5. Training Loop
+    # 4. Training Loop
     best_val_loss = float("inf")
     best_checkpoint_path = artifacts_dir / f"{condition_name}_seed{seed}_best.pt"
     history: List[Dict[str, Any]] = []
@@ -311,7 +237,7 @@ def run_single_experiment(
                 cur_apply_graph = use_graph
 
         if is_unimodal:
-            # Single-modality autoencoder reconstruction baseline
+            # Single-modality reconstruction baseline
             x_uni = train_batch[unimodal_mod]
             if use_dual_heads:
                 z_s, z_p = model.encoders[unimodal_mod](x_uni, return_both=True)
@@ -337,26 +263,20 @@ def run_single_experiment(
                 val_loss = float(F.mse_loss(model.decoders[unimodal_mod](z_p_val), targets_val[unimodal_mod]).item())
 
         else:
-            # Trimodal training with active modality sampling
-            if sampler is not None and epoch > 8:
-                # Dynamic modality sampling: actively select 2 modalities based on sampling weights
-                active_train_batch = sampler.sample_batch_modalities(train_batch, k=2)
-            else:
-                active_train_batch = train_batch
-
+            # Bimodal training
             if use_dual_heads:
-                shared, private = model(active_train_batch, return_private=True, apply_graph=cur_apply_graph)
+                shared, private = model(train_batch, return_private=True, apply_graph=cur_apply_graph)
                 sep_loss = multimodal_separation_loss(shared, private)
-                targets = compute_sensor_summary_targets(active_train_batch)
+                targets = compute_sensor_summary_targets(train_batch)
                 rec_loss = multimodal_reconstruction_loss(private, targets, model.decoders)
             else:
-                shared = model(active_train_batch, return_private=False, apply_graph=cur_apply_graph)
+                shared = model(train_batch, return_private=False, apply_graph=cur_apply_graph)
                 sep_loss = torch.tensor(0.0)
                 rec_loss = torch.tensor(0.0)
 
-            # Alignment loss on active modalities
+            # Alignment loss
             per_sample_align, _ = per_sample_trimodal_contrastive_loss(
-                shared, train_ids_dict, temperature=0.07
+                shared, train_ids_dict, temperature=temperature
             )
             align_loss_mean = per_sample_align.mean()
 
@@ -395,12 +315,12 @@ def run_single_experiment(
                     mod_losses[m] = float(align_loss_mean.item()) + lambda_recon * m_rec
                 sampler.update_from_losses(mod_losses, is_train=True)
 
-            # Validation evaluation (strictly read-only)
+            # Validation evaluation strictly with apply_graph=False
             model.eval()
             with torch.no_grad():
-                val_shared = model(val_batch, return_private=False, apply_graph=cur_apply_graph)
+                val_shared = model(val_batch, return_private=False, apply_graph=False)
                 val_loss_vec, _ = per_sample_trimodal_contrastive_loss(
-                    val_shared, val_ids_dict, temperature=0.07
+                    val_shared, val_ids_dict, temperature=temperature
                 )
                 val_loss = float(val_loss_vec.mean().item())
 
@@ -425,97 +345,52 @@ def run_single_experiment(
 
     train_time = time.time() - start_time
 
-    # 6. Final Evaluation on Held-Out Test Set (Using Best Validation Checkpoint)
+    # 5. Final Evaluation on Held-Out Test Set (Using Best Validation Checkpoint)
     if best_checkpoint_path.exists():
         best_ckpt = torch.load(best_checkpoint_path, map_location="cpu")
         model.load_state_dict(best_ckpt["model_state_dict"])
     model.eval()
 
     with torch.no_grad():
-        if is_unimodal:
-            x_test_uni = test_batch[unimodal_mod]
-            targets_test = compute_sensor_summary_targets({unimodal_mod: x_test_uni})
-            if use_dual_heads:
-                z_s_test, z_p_test = model.encoders[unimodal_mod](x_test_uni, return_both=True)
-                ortho_diag = float(orthogonal_separation_loss(z_s_test, z_p_test).item())
-            else:
-                z_s_test = model.encoders[unimodal_mod](x_test_uni, return_both=False)
-                z_p_test = z_s_test
-                ortho_diag = 0.0
+        # Independent query and gallery encoding - NEVER apply graph attention on test set
+        test_shared = model(test_batch, return_private=False, apply_graph=False)
 
-            rec_test_loss = float(
-                F.mse_loss(model.decoders[unimodal_mod](z_p_test), targets_test[unimodal_mod]).item()
-            )
+        ortho_diag = 0.0
+        if use_dual_heads:
+            _, test_private = model(test_batch, return_private=True, apply_graph=False)
+            ortho_diag = float(multimodal_separation_loss(test_shared, test_private).item())
 
-            # Measure actual test cross-modal performance from model forward pass
-            test_shared = model(test_batch, return_private=False, apply_graph=False)
-            retrieval_res = evaluate_retrieval_and_calibration(
-                test_shared, test_stim_ids, temperature=0.07
-            )
+        test_loss_vec, _ = per_sample_trimodal_contrastive_loss(
+            test_shared, test_ids_dict, temperature=temperature
+        )
+        test_loss = float(test_loss_vec.mean().item())
 
-            per_stim_acc = retrieval_res["per_stimulus_acc"]
-            g_accs = [
-                float(np.mean(per_stim_acc[(group_indices_test == g).numpy()]))
-                if np.sum((group_indices_test == g).numpy()) > 0
-                else retrieval_res["overall_top1"]
-                for g in range(num_groups)
-            ]
+        cat_names_test = [test_cat_map[s] for s in test_stim_ids]
 
-            test_loss_vec, _ = per_sample_trimodal_contrastive_loss(
-                test_shared, test_ids_dict, temperature=0.07
-            )
-            test_loss = float(test_loss_vec.mean().item())
+        retrieval_res = evaluate_clean_crossmodal_retrieval(
+            query_embeddings=test_shared,
+            gallery_embeddings=test_shared,
+            stimulus_ids=test_stim_ids,
+            category_names=cat_names_test,
+            temperature=temperature,
+            seed=seed,
+            model_name=condition_name,
+        )
 
-            test_metrics = {
-                "overall_top1": retrieval_res["overall_top1"],
-                "overall_top2": retrieval_res["overall_top2"],
-                "worst_group_top1": min(g_accs),
-                "disparity_gap": max(g_accs) - min(g_accs),
-                "ece": retrieval_res["ece"],
-                "ortho_diag": ortho_diag,
-                "test_loss": test_loss,
-                "test_rec_loss": rec_test_loss,
-                "pair_top1": retrieval_res["pair_top1"],
-            }
-        else:
-            if use_dual_heads:
-                test_shared, test_private = model(test_batch, return_private=True, apply_graph=use_graph)
-                ortho_diag = float(multimodal_separation_loss(test_shared, test_private).item())
-            else:
-                test_shared = model(test_batch, return_private=False, apply_graph=use_graph)
-                ortho_diag = 0.0
-
-            test_loss_vec, _ = per_sample_trimodal_contrastive_loss(
-                test_shared, test_ids_dict, temperature=0.07
-            )
-            test_loss = float(test_loss_vec.mean().item())
-
-            retrieval_res = evaluate_retrieval_and_calibration(
-                test_shared, test_stim_ids, temperature=0.07
-            )
-
-            # Group disparity calculation on test set
-            per_stim_acc = retrieval_res["per_stimulus_acc"]
-            g_accs = [
-                float(np.mean(per_stim_acc[(group_indices_test == g).numpy()]))
-                if np.sum((group_indices_test == g).numpy()) > 0
-                else retrieval_res["overall_top1"]
-                for g in range(num_groups)
-            ]
-
-            worst_group_top1 = min(g_accs)
-            disparity_gap = max(g_accs) - min(g_accs)
-
-            test_metrics = {
-                "overall_top1": retrieval_res["overall_top1"],
-                "overall_top2": retrieval_res["overall_top2"],
-                "worst_group_top1": worst_group_top1,
-                "disparity_gap": disparity_gap,
-                "ece": retrieval_res["ece"],
-                "ortho_diag": ortho_diag,
-                "test_loss": test_loss,
-                "pair_top1": retrieval_res["pair_top1"],
-            }
+        test_metrics = {
+            "overall_top1": retrieval_res["overall_top1"],
+            "overall_top2": retrieval_res["overall_top2"],
+            "balanced_accuracy": retrieval_res["balanced_accuracy"],
+            "macro_f1": retrieval_res["macro_f1"],
+            "worst_group_top1": retrieval_res["worst_group_accuracy"],
+            "disparity_gap": retrieval_res["disparity_gap"],
+            "ece": retrieval_res["ece"],
+            "ortho_diag": ortho_diag,
+            "test_loss": test_loss,
+            "pair_top1": retrieval_res["direction_top1"],
+            "confusion_matrix": retrieval_res["confusion_matrix"],
+            "prediction_records": retrieval_res["prediction_records"],
+        }
 
     # Parameter count
     param_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -528,9 +403,11 @@ def run_single_experiment(
         "param_count": param_count,
         "best_val_loss": best_val_loss,
         "metrics": test_metrics,
+        "history": history,
         "sampler_diagnostics": sampler.get_diagnostics() if sampler else None,
         "sampler_history": sampler.get_history() if sampler else None,
         "dro_weights": dro.group_weights.tolist() if dro else None,
+        "best_checkpoint_path": str(best_checkpoint_path),
     }
 
     return run_result
@@ -546,6 +423,12 @@ def run_full_benchmark_suite() -> Dict[str, Any]:
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     plots_dir = artifacts_dir / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
+
+    pub_plots_dir = REPO_ROOT / "reports" / "artifacts" / "plots"
+    pub_plots_dir.mkdir(parents=True, exist_ok=True)
+
+    checkpoints_dir = REPO_ROOT / "checkpoints"
+    checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
     # Load dataset & splits using verified manifest
     manifest_path = (
@@ -576,9 +459,8 @@ def run_full_benchmark_suite() -> Dict[str, Any]:
         # Condition A: Single-modality baselines
         {"name": "A1_Single_EEG", "is_unimodal": True, "unimodal_modality": "eeg", "use_dual_heads": True},
         {"name": "A2_Single_MEG", "is_unimodal": True, "unimodal_modality": "meg", "use_dual_heads": True},
-        {"name": "A3_Single_fMRI", "is_unimodal": True, "unimodal_modality": "fmri", "use_dual_heads": True},
 
-        # Condition B: Fixed-Mixture Trimodal ERM
+        # Condition B: Standard Bimodal ERM
         {"name": "B_Trimodal_ERM", "use_dual_heads": False, "use_graph": False, "use_adaptive_mixture": False, "use_dro": False},
 
         # Condition C: Modality-Balanced Training
@@ -613,18 +495,27 @@ def run_full_benchmark_suite() -> Dict[str, Any]:
 
     all_run_results: List[Dict[str, Any]] = []
     summary_rows: List[Dict[str, Any]] = []
+    all_predictions: List[Dict[str, Any]] = []
+
+    best_global_val_loss = float("inf")
+    best_global_ckpt_path: Optional[str] = None
 
     logger.info(f"Starting execution of {len(conditions)} benchmark conditions across {len(seeds)} seeds...")
 
     for cond in conditions:
         cond_name = cond["name"]
         seed_top1: List[float] = []
+        seed_top2: List[float] = []
+        seed_bal_acc: List[float] = []
+        seed_macro_f1: List[float] = []
         seed_worst_top1: List[float] = []
         seed_disparity: List[float] = []
         seed_loss: List[float] = []
         seed_ece: List[float] = []
         seed_ortho: List[float] = []
         seed_time: List[float] = []
+        seed_eeg2meg: List[float] = []
+        seed_meg2eeg: List[float] = []
 
         last_run_for_plots = None
 
@@ -648,6 +539,9 @@ def run_full_benchmark_suite() -> Dict[str, Any]:
 
             m = run_res["metrics"]
             seed_top1.append(m["overall_top1"])
+            seed_top2.append(m["overall_top2"])
+            seed_bal_acc.append(m["balanced_accuracy"])
+            seed_macro_f1.append(m["macro_f1"])
             seed_worst_top1.append(m["worst_group_top1"])
             seed_disparity.append(m["disparity_gap"])
             seed_loss.append(m["test_loss"])
@@ -655,15 +549,32 @@ def run_full_benchmark_suite() -> Dict[str, Any]:
             seed_ortho.append(m["ortho_diag"])
             seed_time.append(run_res["train_time_sec"])
 
+            pair_m = m.get("pair_top1", {})
+            seed_eeg2meg.append(pair_m.get("eeg_to_meg", m["overall_top1"]))
+            seed_meg2eeg.append(pair_m.get("meg_to_eeg", m["overall_top1"]))
+
+            all_predictions.extend(m.get("prediction_records", []))
+
+            # Track best model checkpoint
+            if cond_name == "F_Full_Neuro_GRAPE" and run_res["best_val_loss"] < best_global_val_loss:
+                best_global_val_loss = run_res["best_val_loss"]
+                best_global_ckpt_path = run_res["best_checkpoint_path"]
+
         # Aggregate across seeds
         summary_rows.append({
             "condition": cond_name,
             "overall_top1_mean": float(np.mean(seed_top1)),
             "overall_top1_std": float(np.std(seed_top1)),
+            "overall_top2_mean": float(np.mean(seed_top2)),
+            "overall_top2_std": float(np.std(seed_top2)),
+            "balanced_acc_mean": float(np.mean(seed_bal_acc)),
+            "macro_f1_mean": float(np.mean(seed_macro_f1)),
             "worst_group_top1_mean": float(np.mean(seed_worst_top1)),
             "worst_group_top1_std": float(np.std(seed_worst_top1)),
             "disparity_gap_mean": float(np.mean(seed_disparity)),
             "disparity_gap_std": float(np.std(seed_disparity)),
+            "eeg_to_meg_mean": float(np.mean(seed_eeg2meg)),
+            "meg_to_eeg_mean": float(np.mean(seed_meg2eeg)),
             "test_loss_mean": float(np.mean(seed_loss)),
             "test_loss_std": float(np.std(seed_loss)),
             "ece_mean": float(np.mean(seed_ece)),
@@ -685,6 +596,36 @@ def run_full_benchmark_suite() -> Dict[str, Any]:
         json.dump(summary_rows, f, indent=2)
     logger.info(f"Saved consolidated benchmark summary JSON to {summary_json_path}")
 
+    # Save predictions CSV (filtering to standard requested schema)
+    predictions_df = pd.DataFrame(all_predictions)
+    pred_csv_cols = [
+        "sample_id",
+        "query_modality",
+        "gallery_modality",
+        "true_label",
+        "predicted_label",
+        "rank_1",
+        "rank_2",
+        "confidence",
+        "is_correct",
+        "group_id",
+        "split",
+    ]
+    # For general predictions CSV, prioritize Full Neuro-GRAPE
+    full_preds = predictions_df[predictions_df["model_name"] == "F_Full_Neuro_GRAPE"]
+    if len(full_preds) == 0:
+        full_preds = predictions_df
+
+    pred_csv_path = REPO_ROOT / "reports" / "artifacts" / "predictions.csv"
+    full_preds[pred_csv_cols].to_csv(pred_csv_path, index=False)
+    logger.info(f"Saved submission prediction records to {pred_csv_path}")
+
+    # Copy best checkpoint to checkpoints/best_neurogrape_model.pt
+    if best_global_ckpt_path and Path(best_global_ckpt_path).exists():
+        target_best_ckpt = checkpoints_dir / "best_neurogrape_model.pt"
+        shutil.copyfile(best_global_ckpt_path, target_best_ckpt)
+        logger.info(f"Saved best Neuro-GRAPE checkpoint to {target_best_ckpt}")
+
     # -----------------------------------------------------------------------
     # Generate Diagnostic Visualizations
     # -----------------------------------------------------------------------
@@ -692,6 +633,8 @@ def run_full_benchmark_suite() -> Dict[str, Any]:
 
     # Plot 1: Performance comparison across core baselines
     core_conditions = [
+        "A1_Single_EEG",
+        "A2_Single_MEG",
         "B_Trimodal_ERM",
         "C_Modality_Balanced",
         "D_GroupDRO_Semantic",
@@ -700,7 +643,7 @@ def run_full_benchmark_suite() -> Dict[str, Any]:
     ]
     core_df = summary_df[summary_df["condition"].isin(core_conditions)].copy()
 
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(11, 5.5))
     x = np.arange(len(core_df))
     width = 0.35
 
@@ -708,25 +651,27 @@ def run_full_benchmark_suite() -> Dict[str, Any]:
     plt.bar(x + width / 2, core_df["worst_group_top1_mean"] * 100, width, label="Worst-Group Top-1 Acc (%)", color="#d95f02", alpha=0.9)
 
     plt.ylabel("Accuracy (%)", fontsize=11, fontweight="bold")
-    plt.title("Neuro-GRAPE Benchmark: Overall vs Worst-Group Generalization", fontsize=13, fontweight="bold")
-    plt.xticks(x, [c.replace("_", " ") for c in core_df["condition"]], rotation=15, ha="right", fontsize=9)
+    plt.title("Neuro-GRAPE Benchmark: Overall vs Worst-Group Retrieval", fontsize=13, fontweight="bold")
+    plt.xticks(x, [c.replace("_", " ") for c in core_df["condition"]], rotation=20, ha="right", fontsize=9)
     plt.ylim(0, 105)
     plt.grid(axis="y", alpha=0.3)
-    plt.legend(frameon=True, facecolor="white", loc="lower right")
+    plt.legend(frameon=True, facecolor="white", loc="upper left")
     plt.tight_layout()
     p1 = plots_dir / "benchmark_performance_comparison.png"
     plt.savefig(p1, dpi=300)
+    plt.savefig(pub_plots_dir / "benchmark_performance_comparison.png", dpi=300)
     plt.close()
 
     # Plot 2: Ablation Delta Plot (impact of removing each component from Full Neuro-GRAPE)
-    full_acc = summary_df.loc[summary_df["condition"] == "F_Full_Neuro_GRAPE", "overall_top1_mean"].values[0]
+    full_row = summary_df[summary_df["condition"] == "F_Full_Neuro_GRAPE"]
+    full_acc = full_row["overall_top1_mean"].values[0] if len(full_row) > 0 else 0.5
     ablation_conds = [c for c in summary_df["condition"] if c.startswith("G")]
     ablation_df = summary_df[summary_df["condition"].isin(ablation_conds)].copy()
     deltas = (ablation_df["overall_top1_mean"].values - full_acc) * 100
 
     plt.figure(figsize=(10, 5))
     bar_colors = ["#e41a1c" if d < 0 else "#377eb8" for d in deltas]
-    bars = plt.barh([c.replace("_", " ") for c in ablation_df["condition"]], deltas, color=bar_colors, alpha=0.85)
+    plt.barh([c.replace("_", " ") for c in ablation_df["condition"]], deltas, color=bar_colors, alpha=0.85)
     plt.axvline(0.0, color="black", linestyle="--", linewidth=1)
     plt.xlabel("Top-1 Accuracy Delta (% vs Full Neuro-GRAPE)", fontsize=11, fontweight="bold")
     plt.title("Component Ablations: Impact on Generalization", fontsize=13, fontweight="bold")
@@ -734,33 +679,86 @@ def run_full_benchmark_suite() -> Dict[str, Any]:
     plt.tight_layout()
     p2 = plots_dir / "component_ablation_delta.png"
     plt.savefig(p2, dpi=300)
+    plt.savefig(pub_plots_dir / "component_ablation_delta.png", dpi=300)
     plt.close()
 
     # Plot 3: Adaptive Mixture Trajectory for Full Neuro-GRAPE
-    full_run = [r for r in all_run_results if r["condition"] == "F_Full_Neuro_GRAPE" and r["sampler_history"]][0]
-    history = full_run["sampler_history"]
-    if history:
-        plt.figure(figsize=(8, 4.5))
-        epochs_arr = list(range(len(history)))
-        for mod, col, ls in [("eeg", "#e41a1c", "-"), ("meg", "#377eb8", "--"), ("fmri", "#4daf4a", "-.")]:
-            vals = [h[mod] for h in history]
-            plt.plot(epochs_arr, vals, label=f"Modality: {mod.upper()}", color=col, linestyle=ls, linewidth=2)
-        plt.axhline(0.3333, color="gray", linestyle=":", alpha=0.7, label="Uniform Share (0.33)")
-        plt.axhline(0.15, color="red", linestyle=":", alpha=0.5, label="Allocation Floor (0.15)")
-        plt.xlabel("Training Step", fontsize=11)
-        plt.ylabel("Mixture Weight $\\alpha_m$", fontsize=11)
-        plt.title("Adaptive Data Mixture Trajectory (GRAPE / DOGE)", fontsize=13, fontweight="bold")
-        plt.grid(True, alpha=0.3)
-        plt.legend(frameon=True, facecolor="white")
+    full_runs = [r for r in all_run_results if r["condition"] == "F_Full_Neuro_GRAPE" and r["sampler_history"]]
+    if full_runs:
+        history = full_runs[0]["sampler_history"]
+        if history:
+            plt.figure(figsize=(8, 4.5))
+            epochs_arr = list(range(len(history)))
+            for mod, col, ls in [("eeg", "#e41a1c", "-"), ("meg", "#377eb8", "--")]:
+                vals = [h.get(mod, 0.5) for h in history]
+                plt.plot(epochs_arr, vals, label=f"Modality: {mod.upper()}", color=col, linestyle=ls, linewidth=2)
+            plt.axhline(0.50, color="gray", linestyle=":", alpha=0.7, label="Uniform Share (0.50)")
+            plt.axhline(0.15, color="red", linestyle=":", alpha=0.5, label="Allocation Floor (0.15)")
+            plt.xlabel("Training Step", fontsize=11)
+            plt.ylabel("Mixture Weight $\\alpha_m$", fontsize=11)
+            plt.title("Adaptive Data Mixture Trajectory (GRAPE / DOGE)", fontsize=13, fontweight="bold")
+            plt.grid(True, alpha=0.3)
+            plt.legend(frameon=True, facecolor="white")
+            plt.tight_layout()
+            p3 = plots_dir / "adaptive_mixture_trajectories.png"
+            plt.savefig(p3, dpi=300)
+            plt.savefig(pub_plots_dir / "adaptive_mixture_trajectories.png", dpi=300)
+            plt.close()
+
+    # Plot 4: Retrieval Confusion Matrix
+    if len(full_preds) > 0:
+        plt.figure(figsize=(6, 5))
+        test_cats = ["tadpole", "tarp", "wire", "woman"]
+        cm = np.zeros((4, 4), dtype=int)
+        for _, row in full_preds.iterrows():
+            if row["true_label"] in test_cats and row["predicted_label"] in test_cats:
+                ti = test_cats.index(row["true_label"])
+                pi = test_cats.index(row["predicted_label"])
+                cm[ti, pi] += 1
+        plt.imshow(cm, cmap="Blues", interpolation="nearest")
+        plt.title("Test Retrieval Confusion Matrix (Full Neuro-GRAPE)", fontsize=12, fontweight="bold")
+        plt.colorbar()
+        tick_marks = np.arange(4)
+        plt.xticks(tick_marks, test_cats, rotation=45)
+        plt.yticks(tick_marks, test_cats)
+        plt.xlabel("Predicted Concept", fontweight="bold")
+        plt.ylabel("True Concept", fontweight="bold")
+        for i in range(4):
+            for j in range(4):
+                plt.text(j, i, str(cm[i, j]), ha="center", va="center", color="black" if cm[i, j] < cm.max()/2 else "white")
         plt.tight_layout()
-        p3 = plots_dir / "adaptive_mixture_trajectories.png"
-        plt.savefig(p3, dpi=300)
+        p4 = plots_dir / "retrieval_confusion_matrix.png"
+        plt.savefig(p4, dpi=300)
+        plt.savefig(pub_plots_dir / "retrieval_confusion_matrix.png", dpi=300)
         plt.close()
 
-    logger.info("All benchmark runs and figures successfully generated!")
+    # Plot 5: Loss and Calibration Curves
+    plt.figure(figsize=(9, 4.5))
+    for r in all_run_results:
+        if r["condition"] == "F_Full_Neuro_GRAPE" and r["seed"] == 42:
+            h = r["history"]
+            ep = [x["epoch"] for x in h]
+            tl = [x["train_loss"] for x in h]
+            vl = [x["val_loss"] for x in h]
+            plt.plot(ep, tl, label="Train Loss (Total)", color="#1b9e77", linewidth=2)
+            plt.plot(ep, vl, label="Validation Loss", color="#d95f02", linewidth=2, linestyle="--")
+            break
+    plt.xlabel("Epoch", fontsize=11)
+    plt.ylabel("Loss", fontsize=11)
+    plt.title("Full Neuro-GRAPE Optimization Trajectory (Seed 42)", fontsize=13, fontweight="bold")
+    plt.grid(True, alpha=0.3)
+    plt.legend(frameon=True, facecolor="white")
+    plt.tight_layout()
+    p5 = plots_dir / "loss_and_calibration_curves.png"
+    plt.savefig(p5, dpi=300)
+    plt.savefig(pub_plots_dir / "loss_and_calibration_curves.png", dpi=300)
+    plt.close()
+
+    logger.info("All benchmark runs, predictions, and figures successfully generated!")
     return {
         "summary_csv": str(comparison_csv_path),
         "summary_json": str(summary_json_path),
+        "predictions_csv": str(pred_csv_path),
         "total_runs": len(all_run_results),
     }
 

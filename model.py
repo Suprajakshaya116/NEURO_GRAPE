@@ -84,8 +84,9 @@ if __name__ == "__main__":
                 b_size = len(stim_ids["eeg"])
 
                 print(f"\n[Running Forward Pass on '{split}' Split (N={b_size} Stimuli)]")
+                active_mods = [m for m in ("eeg", "meg", "fmri") if m in batch]
                 print(f"  Input Tensors:")
-                for mod in ("eeg", "meg", "fmri"):
+                for mod in active_mods:
                     print(f"    - {mod.upper():4s}: shape={tuple(batch[mod].shape)}, dtype={batch[mod].dtype}")
 
                 with torch.no_grad():
@@ -93,22 +94,19 @@ if __name__ == "__main__":
                     loss = trimodal_contrastive_loss(embeddings, stim_ids)
 
                 print(f"  Output Latent Embeddings (L2 Sphere):")
-                for mod in ("eeg", "meg", "fmri"):
+                for mod in active_mods:
                     emb = embeddings[mod]
                     norms = torch.norm(emb, p=2, dim=-1)
                     is_unit = torch.allclose(norms, torch.ones_like(norms), atol=1e-5)
                     print(f"    - {mod.upper():4s}: shape={tuple(emb.shape)}, L2 norm={norms.mean().item():.4f} (unit_norm={is_unit})")
 
                 # Cross-modal pairwise cosine similarities
-                sim_eeg_meg = F.cosine_similarity(embeddings["eeg"], embeddings["meg"]).mean().item()
-                sim_eeg_fmri = F.cosine_similarity(embeddings["eeg"], embeddings["fmri"]).mean().item()
-                sim_meg_fmri = F.cosine_similarity(embeddings["meg"], embeddings["fmri"]).mean().item()
-
                 print(f"  Cross-Modal Pairwise Alignment (Mean Diagonal Cosine Sim):")
-                print(f"    - EEG <-> MEG  : {sim_eeg_meg:+.4f}")
-                print(f"    - EEG <-> fMRI : {sim_eeg_fmri:+.4f}")
-                print(f"    - MEG <-> fMRI : {sim_meg_fmri:+.4f}")
-                print(f"  Trimodal Contrastive Loss : {loss.item():.4f}")
+                from itertools import combinations
+                for m1, m2 in combinations(active_mods, 2):
+                    sim = F.cosine_similarity(embeddings[m1], embeddings[m2]).mean().item()
+                    print(f"    - {m1.upper()} <-> {m2.upper()}  : {sim:+.4f}")
+                print(f"  Contrastive Loss : {loss.item():.4f}")
                 break
             except Exception as e:
                 print(f"Could not load split '{split}': {e}")

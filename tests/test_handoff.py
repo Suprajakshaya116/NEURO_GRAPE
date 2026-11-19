@@ -174,7 +174,7 @@ class TestMember2HandoffInterfaces(unittest.TestCase):
         self.assertTrue(pt_path.exists(), "embeddings/embeddings.pt missing.")
 
         df = pd.read_csv(meta_path)
-        self.assertEqual(len(df), 60, "Expected 60 total pilot sample embeddings.")
+        self.assertIn(len(df), (40, 60), "Expected 40 (EEG+MEG) or 60 (trimodal) pilot sample embeddings.")
 
         required_cols = {
             "sample_id",
@@ -189,11 +189,11 @@ class TestMember2HandoffInterfaces(unittest.TestCase):
         }
         self.assertTrue(required_cols.issubset(set(df.columns)))
 
-        # Split counts: 36 train (12 stimuli * 3), 12 val (4 * 3), 12 test (4 * 3)
+        # Split counts: 24 train (12 * 2) or 36 train (12 * 3)
         split_counts = df["split"].value_counts().to_dict()
-        self.assertEqual(split_counts["train"], 36)
-        self.assertEqual(split_counts["val"], 12)
-        self.assertEqual(split_counts["test"], 12)
+        self.assertIn(split_counts["train"], (24, 36))
+        self.assertIn(split_counts["val"], (8, 12))
+        self.assertIn(split_counts["test"], (8, 12))
 
         # Unit norm verification
         self.assertTrue((df["embedding_dim"] == 128).all())
@@ -201,7 +201,7 @@ class TestMember2HandoffInterfaces(unittest.TestCase):
 
         # pt dictionary verification
         pt_dict = torch.load(pt_path, map_location="cpu")
-        self.assertEqual(len(pt_dict), 60)
+        self.assertIn(len(pt_dict), (40, 60))
         first_sid = df.iloc[0]["sample_id"]
         self.assertIn(first_sid, pt_dict)
         self.assertEqual(pt_dict[first_sid].shape, (128,))

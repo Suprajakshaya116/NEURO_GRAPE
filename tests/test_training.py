@@ -72,21 +72,22 @@ class TestTrainingPipeline(unittest.TestCase):
         # Check tensor shapes
         self.assertEqual(batch["eeg"].shape, (12, 63, 225))
         self.assertEqual(batch["meg"].shape, (12, 272, 225))
-        self.assertEqual(batch["fmri"].shape, (12, 1, 96, 96, 60))
+        if "fmri" in batch:
+            self.assertEqual(batch["fmri"].shape, (12, 1, 96, 96, 60))
 
         # Check dtypes and finiteness
-        for mod in ("eeg", "meg", "fmri"):
+        for mod in batch.keys():
             self.assertEqual(batch[mod].dtype, torch.float32)
             self.assertTrue(torch.isfinite(batch[mod]).all().item())
 
         # Check stimulus IDs
         eeg_ids = stim_ids_map["eeg"]
         meg_ids = stim_ids_map["meg"]
-        fmri_ids = stim_ids_map["fmri"]
 
         self.assertEqual(len(eeg_ids), 12)
         self.assertEqual(eeg_ids, meg_ids)
-        self.assertEqual(eeg_ids, fmri_ids)
+        if "fmri" in stim_ids_map:
+            self.assertEqual(eeg_ids, stim_ids_map["fmri"])
         self.assertEqual(len(set(eeg_ids)), 12)
 
         # Check zero overlap with val/test

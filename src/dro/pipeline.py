@@ -191,47 +191,54 @@ def run_member3_pipeline(
         stims = sorted(list(sp_meta["stimulus_id"].unique()))
         valid_stims, eeg_sids, meg_sids, fmri_sids = [], [], [], []
 
+        has_fmri = "fmri" in sp_meta["modality"].str.lower().values
+
         for s in stims:
             e_sub = sp_meta[(sp_meta["stimulus_id"] == s) & (sp_meta["modality"].str.lower() == "eeg")]
             m_sub = sp_meta[(sp_meta["stimulus_id"] == s) & (sp_meta["modality"].str.lower() == "meg")]
             f_sub = sp_meta[(sp_meta["stimulus_id"] == s) & (sp_meta["modality"].str.lower() == "fmri")]
 
-            if len(e_sub) > 0 and len(m_sub) > 0 and len(f_sub) > 0:
+            if len(e_sub) > 0 and len(m_sub) > 0:
+                if has_fmri and len(f_sub) == 0:
+                    continue
                 valid_stims.append(s)
                 eeg_sids.append(e_sub.iloc[0]["sample_id"])
                 meg_sids.append(m_sub.iloc[0]["sample_id"])
-                fmri_sids.append(f_sub.iloc[0]["sample_id"])
+                if has_fmri:
+                    fmri_sids.append(f_sub.iloc[0]["sample_id"])
 
         if not valid_stims:
-            logger.warning(f"Split '{sp}' has no stimuli with complete trimodal coverage; skipping.")
+            logger.warning(f"Split '{sp}' has no stimuli with complete modal coverage; skipping.")
             continue
 
         z_eeg = torch.stack([embeddings_dict[sid] for sid in eeg_sids])
         z_meg = torch.stack([embeddings_dict[sid] for sid in meg_sids])
-        z_fmri = torch.stack([embeddings_dict[sid] for sid in fmri_sids])
 
         # Pairwise symmetric contrastive losses
         l_em = multimodal_contrastive_loss(z_eeg, z_meg, valid_stims, valid_stims, temperature=temperature, reduction="per_example")
-        l_ef = multimodal_contrastive_loss(z_eeg, z_fmri, valid_stims, valid_stims, temperature=temperature, reduction="per_example")
-        l_mf = multimodal_contrastive_loss(z_meg, z_fmri, valid_stims, valid_stims, temperature=temperature, reduction="per_example")
-
-        # Per-sample crossmodal loss: mean pairwise loss against the other two modalities
-        l_sample_eeg = 0.5 * (l_em + l_ef)
-        l_sample_meg = 0.5 * (l_em + l_mf)
-        l_sample_fmri = 0.5 * (l_ef + l_mf)
-
-        # Pairwise cosine similarities
         cos_em = (z_eeg * z_meg).sum(dim=1)
-        cos_ef = (z_eeg * z_fmri).sum(dim=1)
-        cos_mf = (z_meg * z_fmri).sum(dim=1)
 
-        cos_sample_eeg = 0.5 * (cos_em + cos_ef)
-        cos_sample_meg = 0.5 * (cos_em + cos_mf)
-        cos_sample_fmri = 0.5 * (cos_ef + cos_mf)
+        if has_fmri and len(fmri_sids) == len(valid_stims):
+            z_fmri = torch.stack([embeddings_dict[sid] for sid in fmri_sids])
+            l_ef = multimodal_contrastive_loss(z_eeg, z_fmri, valid_stims, valid_stims, temperature=temperature, reduction="per_example")
+            l_mf = multimodal_contrastive_loss(z_meg, z_fmri, valid_stims, valid_stims, temperature=temperature, reduction="per_example")
+            l_sample_eeg = 0.5 * (l_em + l_ef)
+            l_sample_meg = 0.5 * (l_em + l_mf)
+            l_sample_fmri = 0.5 * (l_ef + l_mf)
 
-        ordered_sids = eeg_sids + meg_sids + fmri_sids
-        all_losses = torch.cat([l_sample_eeg, l_sample_meg, l_sample_fmri]).detach().cpu()
-        all_cosines = torch.cat([cos_sample_eeg, cos_sample_meg, cos_sample_fmri]).detach().cpu()
+            cos_ef = (z_eeg * z_fmri).sum(dim=1)
+            cos_mf = (z_meg * z_fmri).sum(dim=1)
+            cos_sample_eeg = 0.5 * (cos_em + cos_ef)
+            cos_sample_meg = 0.5 * (cos_em + cos_mf)
+            cos_sample_fmri = 0.5 * (cos_ef + cos_mf)
+
+            ordered_sids = eeg_sids + meg_sids + fmri_sids
+            all_losses = torch.cat([l_sample_eeg, l_sample_meg, l_sample_fmri]).detach().cpu()
+            all_cosines = torch.cat([cos_sample_eeg, cos_sample_meg, cos_sample_fmri]).detach().cpu()
+        else:
+            ordered_sids = eeg_sids + meg_sids
+            all_losses = torch.cat([l_em, l_em]).detach().cpu()
+            all_cosines = torch.cat([cos_em, cos_em]).detach().cpu()
 
         sid_to_group = dict(zip(sp_meta["sample_id"], sp_meta["group_id"]))
         all_groups = torch.tensor([sid_to_group[sid] for sid in ordered_sids], dtype=torch.long)

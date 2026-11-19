@@ -21,9 +21,9 @@
     "clustering_diagnostics_json": "reports\\artifacts\\clustering_diagnostics.json",
     "experiment_config_yaml": "reports\\artifacts\\experiment_config.yaml"
   },
-  "train_sample_count": 36,
+  "train_sample_count": 24,
   "final_group_weights": {
-    "Cluster_0": 0.5129064917564392,
-    "Cluster_1": 0.487093448638916
+    "Cluster_0": 0.5,
+    "Cluster_1": 0.5
   }
 }

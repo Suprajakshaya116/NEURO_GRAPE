@@ -49,7 +49,7 @@ class AdaptiveMixtureSampler:
 
     def __init__(
         self,
-        modalities: Sequence[str] = ("eeg", "meg", "fmri"),
+        modalities: Sequence[str] = ("eeg", "meg"),
         step_size: float = 0.05,
         ema_beta: float = 0.9,
         min_weight: float = 0.15,
