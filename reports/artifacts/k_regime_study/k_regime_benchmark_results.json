@@ -1,0 +1,138 @@
+[
+  {
+    "k": 2,
+    "name": "GroupDRO_K2",
+    "elapsed_time": 22.7720685005188,
+    "best_val_loss": 6.159384727478027,
+    "silhouette": 0.3188577890396118,
+    "cluster_sizes_train": [
+      242,
+      1712
+    ],
+    "cluster_sizes_test": [
+      47,
+      379
+    ],
+    "raw_top1": 0.002347417840375587,
+    "raw_top2": 0.004694835680751174,
+    "raw_top5": 0.009389671361502348,
+    "raw_top10": 0.01995305164319249,
+    "raw_mrr": 0.014552947325873495,
+    "raw_worst_group": 0.0,
+    "raw_disparity_gap": 0.002638522427440633,
+    "raw_ece": 0.005874641472473741,
+    "centered_top1": 0.002347417840375587,
+    "centered_top2": 0.002347417840375587,
+    "centered_top5": 0.007042253521126761,
+    "centered_top10": 0.028169014084507043,
+    "centered_mrr": 0.014624641063204087,
+    "centered_worst_group": 0.0,
+    "centered_disparity_gap": 0.002638522427440633,
+    "max_hub_count": 26
+  },
+  {
+    "k": 3,
+    "name": "GroupDRO_K3",
+    "elapsed_time": 21.50236201286316,
+    "best_val_loss": 6.1710991859436035,
+    "silhouette": 0.31584909558296204,
+    "cluster_sizes_train": [
+      145,
+      1589,
+      220
+    ],
+    "cluster_sizes_test": [
+      36,
+      349,
+      41
+    ],
+    "raw_top1": 0.0011737089201877935,
+    "raw_top2": 0.004694835680751174,
+    "raw_top5": 0.011737089201877934,
+    "raw_top10": 0.022300469483568074,
+    "raw_mrr": 0.01490619493371154,
+    "raw_worst_group": 0.0,
+    "raw_disparity_gap": 0.0014326647564469914,
+    "raw_ece": 0.007528545917011797,
+    "centered_top1": 0.0,
+    "centered_top2": 0.0,
+    "centered_top5": 0.007042253521126761,
+    "centered_top10": 0.023474178403755867,
+    "centered_mrr": 0.012758628940269143,
+    "centered_worst_group": 0.0,
+    "centered_disparity_gap": 0.0,
+    "max_hub_count": 39
+  },
+  {
+    "k": 4,
+    "name": "GroupDRO_K4",
+    "elapsed_time": 22.252211332321167,
+    "best_val_loss": 6.199868202209473,
+    "silhouette": 0.11481703072786331,
+    "cluster_sizes_train": [
+      145,
+      758,
+      139,
+      912
+    ],
+    "cluster_sizes_test": [
+      28,
+      174,
+      34,
+      190
+    ],
+    "raw_top1": 0.0035211267605633804,
+    "raw_top2": 0.004694835680751174,
+    "raw_top5": 0.015258215962441314,
+    "raw_top10": 0.03169014084507042,
+    "raw_mrr": 0.017898696274954055,
+    "raw_worst_group": 0.0,
+    "raw_disparity_gap": 0.017857142857142856,
+    "raw_ece": 0.0053466008976101875,
+    "centered_top1": 0.0,
+    "centered_top2": 0.0,
+    "centered_top5": 0.007042253521126761,
+    "centered_top10": 0.01643192488262911,
+    "centered_mrr": 0.012841437917626899,
+    "centered_worst_group": 0.0,
+    "centered_disparity_gap": 0.0,
+    "max_hub_count": 38
+  },
+  {
+    "k": 5,
+    "name": "GroupDRO_K5",
+    "elapsed_time": 22.49977731704712,
+    "best_val_loss": 6.133968353271484,
+    "silhouette": 0.11244309693574905,
+    "cluster_sizes_train": [
+      134,
+      658,
+      327,
+      760,
+      75
+    ],
+    "cluster_sizes_test": [
+      34,
+      145,
+      71,
+      164,
+      12
+    ],
+    "raw_top1": 0.002347417840375587,
+    "raw_top2": 0.002347417840375587,
+    "raw_top5": 0.008215962441314555,
+    "raw_top10": 0.018779342723004695,
+    "raw_mrr": 0.013567656671363188,
+    "raw_worst_group": 0.0,
+    "raw_disparity_gap": 0.0034482758620689655,
+    "raw_ece": 0.005010248860344291,
+    "centered_top1": 0.0,
+    "centered_top2": 0.0,
+    "centered_top5": 0.007042253521126761,
+    "centered_top10": 0.014084507042253521,
+    "centered_mrr": 0.010737329925641706,
+    "centered_worst_group": 0.0,
+    "centered_disparity_gap": 0.0,
+    "max_hub_count": 37
+  }
+]
