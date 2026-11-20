@@ -188,3 +188,40 @@ NEURO_GRAPE/
    ```powershell
    python scripts/run_member3_pipeline.py
    ```
+
+
+---
+
+## S7. Scaled Multi-Concept Dataset Specifications & Partitions
+
+The scaled benchmark evaluates Neuro-GRAPE on the full multimodal visual concept dataset:
+- **Total Dataset Size**: 2,804 paired trials across 1,499 unique visual object concepts.
+- **EEG Dimension**: $(2804, 63, 257)$ float32 (181.6 MB).
+- **MEG Dimension**: $(2804, 310, 257)$ float32 (893.6 MB).
+- **Partitioning Protocol**: Strictly concept-disjoint splitting (no semantic concept appears in more than one partition):
+  - **Train Split**: 1,954 trials (1,049 concepts, 69.7%).
+  - **Validation Split**: 424 trials (225 concepts, 15.1%).
+  - **Test Split**: 426 trials (225 concepts, 15.2%).
+- **Chance Retrieval Baseline**: With 426 test candidates, random guessing chance is $1/426 \approx 0.2347\%$.
+
+---
+
+## S8. Geometric Centering & Hubness Diagnostics
+
+In high-dimensional multimodal embedding spaces, embeddings suffer from the "cone effect" where modality-specific mean vectors dominate cosine similarity.
+- **Gallery Centering**: $\tilde{\mathbf{z}}_g = \frac{\mathbf{z}_g - \boldsymbol{\mu}_g}{\|\mathbf{z}_g - \boldsymbol{\mu}_g\|_2}$.
+- **Dual Mean-Centering**: Centers both query $\mathbf{z}_q$ and gallery $\mathbf{z}_g$ before computing dot products.
+- **Hubness Metrics**:
+  - *Hubness Skewness*: Skewness of the distribution of $k$-occurrences (number of times each gallery item appears as rank-1 nearest neighbor).
+  - *Max Hub Occurrences*: The highest number of queries falsely captured by a single gallery item. Dual Mean-Centering and CSLS cut max hub occurrences from $89.5 \to 33.0$ on `GroupDRO_Cluster` and $61.5 \to 38.0$ on `Full_Neuro_GRAPE`.
+
+---
+
+## S9. Neural Data Augmentation Specifications
+
+To suppress sample-level memorization without changing the neural architecture:
+- **Sensor Channel Dropout**: Randomly drops $15\%$ of channels per sample ($p=0.15$).
+- **Temporal Cutout**: Randomly zeros out contiguous $15\%$ temporal slices ($35\text{--}40\text{ ms}$).
+- **Gaussian Jitter**: Zero-mean additive Gaussian noise $\mathcal{N}(0, \sigma^2)$ with $\sigma=0.02$.
+- **Optimizer Regularization**: AdamW weight decay set to $10^{-2}$.
+- **Certified Evaluation**: Augmentations are deactivated during validation and test passes (`apply_graph=False`, clean unaugmented data).
